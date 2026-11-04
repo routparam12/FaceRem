@@ -17,7 +17,7 @@ export default function Nav({ me }: { me: Me }) {
     { href: "/dashboard/employees", label: "People", show: true },
     { href: "/dashboard/scan", label: "Scan", show: canRunScans(me.role) },
     { href: "/dashboard/attendance", label: "Attendance", show: true },
-    { href: "/dashboard/audit", label: "Audit log", show: me.role === "ORG_ADMIN" },
+    { href: "/dashboard/audit", label: "Audit log", show: me.role === "ORG_ADMIN" || me.role === "ORGANIZATION_ADMIN" },
   ].filter((link) => link.show);
 
   async function signOut() {

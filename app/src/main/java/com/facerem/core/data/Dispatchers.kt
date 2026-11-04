@@ -1,5 +1,6 @@
 package com.facerem.core.data
 
+import com.facerem.core.camera.FaceQualityEvaluator
 import com.facerem.core.common.AppResult
 import com.facerem.core.model.AttendanceRecord
 import com.facerem.core.model.Branch
@@ -7,6 +8,7 @@ import com.facerem.core.model.DashboardSummary
 import com.facerem.core.model.Department
 import com.facerem.core.model.Employee
 import com.facerem.core.model.FaceEnrollmentStatus
+import com.facerem.core.model.LivenessChallenge
 import com.facerem.core.model.RecognitionOutcome
 import com.facerem.core.model.Shift
 import com.facerem.core.session.SessionManager
@@ -37,6 +39,11 @@ internal class DispatchingEmployeeRepository(
 
     override suspend fun createEmployee(employee: NewEmployee): AppResult<Employee> =
         active().createEmployee(employee)
+
+    override suspend fun submitFaceEnrollment(
+        employeeId: String,
+        frames: Map<FaceQualityEvaluator.HeadPose, ByteArray>,
+    ): AppResult<FaceEnrollmentStatus> = active().submitFaceEnrollment(employeeId, frames)
 
     override suspend fun submitFaceEnrollment(
         employeeId: String,
@@ -71,11 +78,17 @@ internal class DispatchingAttendanceRepository(
     private suspend fun active(): AttendanceRepository =
         if (session.isGuest.first()) demo else remote
 
+    override suspend fun requestChallenge(): AppResult<LivenessChallenge> =
+        active().requestChallenge()
+
     override suspend fun recognize(
         image: ByteArray,
-        livenessScore: Float,
+        challengeId: String?,
+        nonce: String?,
+        burstFrames: List<ByteArray>,
         deviceLabel: String,
-    ): AppResult<RecognitionOutcome> = active().recognize(image, livenessScore, deviceLabel)
+    ): AppResult<RecognitionOutcome> =
+        active().recognize(image, challengeId, nonce, burstFrames, deviceLabel)
 
     override suspend fun history(): AppResult<List<AttendanceRecord>> = active().history()
 }

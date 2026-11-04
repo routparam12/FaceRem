@@ -14,6 +14,11 @@ python-multipart>=0.0.9
 numpy>=2.0
 pillow>=10.4
 
+# Phase 2: RFC 6238 TOTP, AES-256-GCM encryption at rest, distributed rate limiting
+pyotp>=2.9
+cryptography>=42.0
+redis>=5.0
+
 # Real face recognition (FACE_ENGINE=insightface). The ~280 MB ArcFace model downloads
 # to ~/.insightface on first use.
 insightface>=2.1

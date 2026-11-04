@@ -6,6 +6,11 @@ never drift from what the app actually runs against. Nothing here hardcodes a co
 """
 
 from logging.config import fileConfig
+from pathlib import Path
+import sys
+
+# Ensure backend root is on sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
@@ -21,8 +26,9 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# app/config.py is the single source of truth for the URL, so alembic.ini has none.
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+# app/config.py is the default source of truth for the URL unless explicitly configured.
+if not config.get_main_option("sqlalchemy.url"):
+    config.set_main_option("sqlalchemy.url", get_settings().database_url)
 
 target_metadata = Base.metadata
 

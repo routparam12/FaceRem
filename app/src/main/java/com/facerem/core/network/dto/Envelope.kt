@@ -121,3 +121,11 @@ data class DashboardDto(
 
 @Serializable
 data class NamedDto(val id: String, val name: String)
+
+@Serializable
+data class ChallengeResponseDto(
+    @SerialName("challenge_id") val challengeId: String,
+    val nonce: String,
+    val actions: List<String> = emptyList(),
+    @SerialName("expires_at") val expiresAt: String = "",
+)

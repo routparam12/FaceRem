@@ -4,26 +4,75 @@ import { API_BASE_URL } from "@/lib/api";
 import { getAccessToken } from "@/lib/session";
 
 /**
- * Authenticated passthrough for calls that must start in the browser: creating an employee,
- * uploading a captured frame for enrollment, running a scan, and revoking a face profile.
- * The token is attached here, server-side, so it never enters JavaScript.
- *
- * This is a per-method allowlist, not an open relay: anything not listed is refused, so a future
- * endpoint cannot be reached from the browser by accident.
+ * Authenticated BFF proxy for browser-initiated requests.
+ * Attaches the httpOnly session access token so it is never exposed in JavaScript.
+ * Strictly enforces an endpoint allowlist and validates Same-Origin CSRF protection.
  */
 const ALLOWED: Record<string, RegExp[]> = {
+  GET: [
+    /^api\/v1\/devices$/,
+    /^api\/v1\/cameras$/,
+    /^api\/v1\/employees$/,
+    /^api\/v1\/employees\/[\w-]+$/,
+    /^api\/v1\/attendance\/events$/,
+    /^api\/v1\/organization$/,
+    /^api\/v1\/reports\/attendance-events\.csv$/,
+    /^api\/v1\/reports\/monthly-summary\.csv$/,
+  ],
   POST: [
     /^api\/v1\/employees$/,
     /^api\/v1\/employees\/[\w-]+\/face\/enroll$/,
+    /^api\/v1\/employees\/[\w-]+\/pin$/,
     /^api\/v1\/attendance\/recognize$/,
+    /^api\/v1\/attendance\/events\/[\w-]+\/void$/,
+    /^api\/v1\/attendance\/events\/[\w-]+\/confirm$/,
+    /^api\/v1\/devices\/enrollment-code$/,
+    /^api\/v1\/devices\/[\w-]+\/revoke$/,
+    /^api\/v1\/cameras$/,
+    /^api\/v1\/auth\/totp\/setup$/,
+    /^api\/v1\/auth\/totp\/verify$/,
   ],
-  DELETE: [/^api\/v1\/employees\/[\w-]+\/face$/],
+  PATCH: [
+    /^api\/v1\/employees\/[\w-]+$/,
+    /^api\/v1\/devices\/[\w-]+$/,
+    /^api\/v1\/cameras\/[\w-]+$/,
+    /^api\/v1\/organization$/,
+  ],
+  DELETE: [
+    /^api\/v1\/employees\/[\w-]+\/face$/,
+  ],
 };
 
-async function forward(request: Request, path: string[], method: "POST" | "DELETE") {
-  const target = path.join("/");
+function validateCsrf(request: Request): boolean {
+  if (["GET", "HEAD", "OPTIONS"].includes(request.method)) return true;
 
-  if (!ALLOWED[method].some((pattern) => pattern.test(target))) {
+  const origin = request.headers.get("origin");
+  const host = request.headers.get("host");
+  if (!origin || !host) return true;
+
+  try {
+    const originHost = new URL(origin).host;
+    return originHost === host;
+  } catch {
+    return false;
+  }
+}
+
+async function forward(
+  request: Request,
+  path: string[],
+  method: "GET" | "POST" | "PATCH" | "DELETE",
+) {
+  if (!validateCsrf(request)) {
+    return NextResponse.json(
+      { success: false, error: { code: "CSRF_ERROR", message: "Cross-site request forgery detected." } },
+      { status: 403 },
+    );
+  }
+
+  const target = path.join("/");
+  const allowedList = ALLOWED[method] ?? [];
+  if (!allowedList.some((pattern) => pattern.test(target))) {
     return NextResponse.json(
       { success: false, error: { code: "FORBIDDEN", message: "This endpoint is not proxied." } },
       { status: 403 },
@@ -38,25 +87,44 @@ async function forward(request: Request, path: string[], method: "POST" | "DELET
     );
   }
 
+  const url = new URL(request.url);
+  const targetUrl = `${API_BASE_URL}/${target}${url.search}`;
+
   const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
   const contentType = request.headers.get("content-type");
-  // Preserve the multipart boundary, or the JSON type, from the original request.
   if (contentType) headers["Content-Type"] = contentType;
 
-  const upstream = await fetch(`${API_BASE_URL}/${target}`, {
+  const upstream = await fetch(targetUrl, {
     method,
     headers,
-    body: method === "DELETE" ? undefined : await request.arrayBuffer(),
+    body: ["GET", "DELETE"].includes(method) ? undefined : await request.arrayBuffer(),
   });
 
-  return new NextResponse(await upstream.text(), {
+  const responseContentType = upstream.headers.get("content-type") ?? "application/json";
+  const upstreamHeaders: Record<string, string> = {
+    "Content-Type": responseContentType,
+  };
+  const disposition = upstream.headers.get("content-disposition");
+  if (disposition) {
+    upstreamHeaders["Content-Disposition"] = disposition;
+  }
+
+  return new NextResponse(await upstream.arrayBuffer(), {
     status: upstream.status,
-    headers: { "Content-Type": "application/json" },
+    headers: upstreamHeaders,
   });
+}
+
+export async function GET(request: Request, context: { params: Promise<{ path: string[] }> }) {
+  return forward(request, (await context.params).path, "GET");
 }
 
 export async function POST(request: Request, context: { params: Promise<{ path: string[] }> }) {
   return forward(request, (await context.params).path, "POST");
+}
+
+export async function PATCH(request: Request, context: { params: Promise<{ path: string[] }> }) {
+  return forward(request, (await context.params).path, "PATCH");
 }
 
 export async function DELETE(request: Request, context: { params: Promise<{ path: string[] }> }) {

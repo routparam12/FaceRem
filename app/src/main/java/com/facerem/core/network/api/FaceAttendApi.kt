@@ -2,6 +2,7 @@ package com.facerem.core.network.api
 
 import com.facerem.core.network.dto.ApiEnvelope
 import com.facerem.core.network.dto.AttendanceRecordDto
+import com.facerem.core.network.dto.ChallengeResponseDto
 import com.facerem.core.network.dto.DashboardDto
 import com.facerem.core.network.dto.EmployeeDto
 import com.facerem.core.network.dto.EnrollResponseDto
@@ -35,15 +36,22 @@ interface FaceAttendApi {
     @POST("api/v1/employees/{id}/face/enroll")
     suspend fun enrollFace(
         @Path("id") id: String,
-        @Part image: MultipartBody.Part,
+        @Part front: MultipartBody.Part,
+        @Part left: MultipartBody.Part,
+        @Part right: MultipartBody.Part,
         @Part("consent") consent: RequestBody,
     ): ApiEnvelope<EnrollResponseDto>
+
+    @POST("api/v1/attendance/challenge")
+    suspend fun challenge(): ApiEnvelope<ChallengeResponseDto>
 
     @Multipart
     @POST("api/v1/attendance/recognize")
     suspend fun recognize(
         @Part image: MultipartBody.Part,
-        @Part("liveness_score") livenessScore: RequestBody,
+        @Part("challenge_id") challengeId: RequestBody?,
+        @Part("nonce") nonce: RequestBody?,
+        @Part burst: List<MultipartBody.Part>,
         @Part("device_label") deviceLabel: RequestBody,
     ): ApiEnvelope<RecognizeResponseDto>
 

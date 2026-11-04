@@ -138,7 +138,7 @@ fun FaceEnrollmentRoute(
                         onQuality = { status ->
                             viewModel.onQuality(status, captureController::capture)
                         },
-                        onSubmit = { viewModel.submit(captureController::capture) },
+                        onSubmit = { viewModel.submit() },
                         onRetake = viewModel::retake,
                     )
                 }
@@ -266,7 +266,7 @@ private fun CaptureStep(
                 .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                 .border(1.dp, accent.copy(alpha = 0.35f), MaterialTheme.shapes.extraLarge),
         ) {
-            if (!uiState.allPosesCaptured) {
+            if (uiState.isCameraActive) {
                 FaceCameraPreview(
                     detector = detector,
                     pose = uiState.currentPose,
@@ -274,9 +274,16 @@ private fun CaptureStep(
                     modifier = Modifier.fillMaxSize(),
                     captureController = captureController,
                 )
+            }
+            if (!uiState.allPosesCaptured) {
                 FaceFramingOverlay(accent = accent, isActive = !uiState.isSubmitting)
             } else {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)),
+                    contentAlignment = Alignment.Center,
+                ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(
                             modifier = Modifier

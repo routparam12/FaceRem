@@ -19,9 +19,47 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
 )
+from sqlalchemy.types import TypeDecorator
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+import numpy as np
 
 from .db import Base
+
+
+class VectorType(TypeDecorator):
+    """
+    Transparent vector type that maps to pgvector's VECTOR(dim) on PostgreSQL
+    and JSON on SQLite or fallback.
+    """
+    impl = JSON
+    cache_ok = True
+
+    def __init__(self, dim: int = 512, **kwargs):
+        super().__init__(**kwargs)
+        self.dim = dim
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            try:
+                from pgvector.sqlalchemy import VECTOR
+                return dialect.type_descriptor(VECTOR(self.dim))
+            except Exception:
+                return dialect.type_descriptor(JSON())
+        return dialect.type_descriptor(JSON())
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+        return value
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+        return list(value)
 
 
 def _uuid() -> str:
@@ -34,11 +72,21 @@ def _now() -> datetime:
 
 class Role(str, enum.Enum):
     SUPER_ADMIN = "SUPER_ADMIN"
-    ORG_ADMIN = "ORG_ADMIN"
+    ORGANIZATION_ADMIN = "ORGANIZATION_ADMIN"
     HR_ADMIN = "HR_ADMIN"
     MANAGER = "MANAGER"
-    EMPLOYEE = "EMPLOYEE"
     ATTENDANCE_DEVICE = "ATTENDANCE_DEVICE"
+
+
+class DeviceMode(str, enum.Enum):
+    AUTO = "AUTO"
+    IN_ONLY = "IN_ONLY"
+    OUT_ONLY = "OUT_ONLY"
+
+
+class DeviceStatus(str, enum.Enum):
+    ACTIVE = "ACTIVE"
+    REVOKED = "REVOKED"
 
 
 class AttendanceStatus(str, enum.Enum):
@@ -48,6 +96,32 @@ class AttendanceStatus(str, enum.Enum):
     ON_LEAVE = "ON_LEAVE"
 
 
+class CameraSourceType(str, enum.Enum):
+    ANDROID_KIOSK = "ANDROID_KIOSK"
+    EDGE_AGENT = "EDGE_AGENT"
+
+
+class CameraDirection(str, enum.Enum):
+    IN_ONLY = "IN_ONLY"
+    OUT_ONLY = "OUT_ONLY"
+    AUTO = "AUTO"
+
+
+class CameraAssurance(str, enum.Enum):
+    HIGH = "HIGH"
+    STANDARD = "STANDARD"
+
+
+class AttendanceEventType(str, enum.Enum):
+    CHECK_IN = "CHECK_IN"
+    CHECK_OUT = "CHECK_OUT"
+
+
+class AttendanceMethod(str, enum.Enum):
+    FACE = "FACE"
+    PIN = "PIN"
+
+
 class Organization(Base):
     __tablename__ = "organizations"
 
@@ -55,12 +129,13 @@ class Organization(Base):
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     slug: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     plan: Mapped[str] = mapped_column(String(32), default="TRIAL")
+    timezone: Mapped[str] = mapped_column(String(64), default="UTC", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
 class User(Base):
-    """A login. `employee_id` links a self-service EMPLOYEE login to its employee record."""
+    """A staff sign-in login (Super Admin, Organization Admin, HR Admin, Manager)."""
 
     __tablename__ = "users"
     __table_args__ = (UniqueConstraint("organization_id", "email", name="uq_user_org_email"),)
@@ -76,8 +151,20 @@ class User(Base):
     employee_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("employees.id"), nullable=True
     )
+    branch_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("branches.id"), nullable=True
+    )
+    department_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("departments.id"), nullable=True
+    )
+    totp_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    recovery_codes: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    branch: Mapped["Branch | None"] = relationship()
+    department: Mapped["Department | None"] = relationship()
 
 
 class SubscriptionStatus(str, enum.Enum):
@@ -212,6 +299,9 @@ class Employee(Base):
         String(36), ForeignKey("shifts.id"), nullable=True, index=True
     )
     job_title: Mapped[str] = mapped_column(String(96), default="")
+    pin_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    failed_pin_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    pin_locked_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
@@ -221,12 +311,93 @@ class Employee(Base):
     face_profiles: Mapped[list["FaceProfile"]] = relationship(back_populates="employee")
 
 
+class AttendanceDevice(Base):
+    __tablename__ = "attendance_devices"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    organization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(96), nullable=False)
+    branch_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("branches.id"), nullable=True
+    )
+    mode: Mapped[DeviceMode] = mapped_column(
+        Enum(DeviceMode), default=DeviceMode.AUTO, nullable=False
+    )
+    status: Mapped[DeviceStatus] = mapped_column(
+        Enum(DeviceStatus), default=DeviceStatus.ACTIVE, nullable=False
+    )
+    registered_by: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=True
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    branch: Mapped[Branch | None] = relationship()
+    cameras: Mapped[list["Camera"]] = relationship(back_populates="device", cascade="all, delete-orphan")
+
+
+class Camera(Base):
+    __tablename__ = "cameras"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    organization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    source_type: Mapped[CameraSourceType] = mapped_column(
+        Enum(CameraSourceType), default=CameraSourceType.ANDROID_KIOSK, nullable=False
+    )
+    device_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("attendance_devices.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(96), nullable=False)
+    branch_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("branches.id"), nullable=True
+    )
+    direction: Mapped[CameraDirection] = mapped_column(
+        Enum(CameraDirection), default=CameraDirection.AUTO, nullable=False
+    )
+    assurance: Mapped[CameraAssurance] = mapped_column(
+        Enum(CameraAssurance), default=CameraAssurance.HIGH, nullable=False
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+    device: Mapped["AttendanceDevice"] = relationship(back_populates="cameras")
+    branch: Mapped["Branch | None"] = relationship()
+
+
+class DeviceEnrollmentCode(Base):
+    __tablename__ = "device_enrollment_codes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    organization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    code_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    created_by_user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=False
+    )
+    device_name: Mapped[str] = mapped_column(String(96), nullable=False)
+    branch_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("branches.id"), nullable=True
+    )
+    mode: Mapped[DeviceMode] = mapped_column(
+        Enum(DeviceMode), default=DeviceMode.AUTO, nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
 class FaceProfile(Base):
     """
-    One active embedding per employee. `revoked_at` soft-deletes it: removing a face profile must
-    never remove attendance history.
-
-    In production `embedding` is a pgvector column; JSON here keeps the PoC on SQLite.
+    Face embeddings for an employee. Multiple poses (FRONT, LEFT, RIGHT) are grouped
+    by enrollment_id. Revoking or deleting a face profile hard-deletes the biometric
+    embeddings, leaving attendance history untouched.
     """
 
     __tablename__ = "face_profiles"
@@ -238,10 +409,18 @@ class FaceProfile(Base):
     employee_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("employees.id"), nullable=False, index=True
     )
+    enrollment_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )
+    pose: Mapped[str] = mapped_column(String(16), default="FRONT", nullable=False)
     embedding: Mapped[list[float]] = mapped_column(JSON, nullable=False)
+    embedding_vec: Mapped[list[float] | None] = mapped_column(VectorType(512), nullable=True)
     model_name: Mapped[str] = mapped_column(String(64), nullable=False)
     model_version: Mapped[str] = mapped_column(String(32), nullable=False)
     quality_score: Mapped[float] = mapped_column(Float, default=0.0)
+    consented_by_user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=True
+    )
     consent_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -272,6 +451,51 @@ class AttendanceRecord(Base):
     match_confidence: Mapped[float] = mapped_column(Float, default=0.0)
     liveness_score: Mapped[float] = mapped_column(Float, default=0.0)
     device_label: Mapped[str] = mapped_column(String(96), default="")
+
+
+class AttendanceEvent(Base):
+    """
+    Immutable event stream. Daily AttendanceRecord summaries are derived from these events.
+    The attendance engine is camera-independent and does not reference any camera hardware SDKs.
+    """
+    __tablename__ = "attendance_events"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "idempotency_key", name="uq_attendance_events_idempotency"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    organization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    employee_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("employees.id"), nullable=False, index=True
+    )
+    device_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("attendance_devices.id"), nullable=False, index=True
+    )
+    camera_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("cameras.id"), nullable=True, index=True
+    )
+    source_type: Mapped[CameraSourceType] = mapped_column(
+        Enum(CameraSourceType), default=CameraSourceType.ANDROID_KIOSK, nullable=False
+    )
+    type: Mapped[AttendanceEventType] = mapped_column(
+        Enum(AttendanceEventType), nullable=False
+    )
+    occurred_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False, index=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    method: Mapped[AttendanceMethod] = mapped_column(
+        Enum(AttendanceMethod), default=AttendanceMethod.FACE, nullable=False
+    )
+    idempotency_key: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    provisional: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    void_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+    employee: Mapped[Employee] = relationship()
+    device: Mapped[AttendanceDevice] = relationship()
+    camera: Mapped[Camera | None] = relationship()
 
 
 class AuditLog(Base):

@@ -3,8 +3,22 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import PLAN_SEATS, Subscription, SubscriptionStatus, Branch, Department, Employee, Organization, Role, Shift, User
-from .security import hash_password
+from .models import (
+    PLAN_SEATS,
+    AttendanceDevice,
+    Branch,
+    Department,
+    DeviceMode,
+    DeviceStatus,
+    Employee,
+    Organization,
+    Role,
+    Shift,
+    Subscription,
+    SubscriptionStatus,
+    User,
+)
+from .security import hash_password, hash_pin
 
 DEMO_PASSWORD = "demo12345"
 
@@ -15,7 +29,7 @@ _ORGS = [
 ]
 
 _STAFF = [
-    ("admin@{slug}.demo", "Org Admin", Role.ORG_ADMIN),
+    ("admin@{slug}.demo", "Org Admin", Role.ORGANIZATION_ADMIN),
     ("hr@{slug}.demo", "HR Admin", Role.HR_ADMIN),
     ("manager@{slug}.demo", "Team Manager", Role.MANAGER),
     ("kiosk@{slug}.demo", "Lobby Kiosk", Role.ATTENDANCE_DEVICE),
@@ -45,22 +59,36 @@ def seed_demo_data(db: Session) -> None:
             )
         )
 
+        admin_user = None
         for email_template, full_name, role in _STAFF:
-            db.add(
-                User(
-                    organization_id=organization.id,
-                    email=email_template.format(slug=slug),
-                    password_hash=hash_password(DEMO_PASSWORD),
-                    full_name=f"{full_name} ({name})",
-                    role=role,
-                )
+            user = User(
+                organization_id=organization.id,
+                email=email_template.format(slug=slug),
+                password_hash=hash_password(DEMO_PASSWORD),
+                full_name=f"{full_name} ({name})",
+                role=role,
             )
+            db.add(user)
+            db.flush()
+            if role == Role.ORGANIZATION_ADMIN:
+                admin_user = user
 
         departments: dict[str, Department] = {}
         branch = Branch(organization_id=organization.id, name="Head Office", city=name.split()[0])
         shift = Shift(organization_id=organization.id, name="General Shift", start_time="09:00")
         db.add(branch)
         db.add(shift)
+        db.flush()
+
+        kiosk_device = AttendanceDevice(
+            organization_id=organization.id,
+            name=f"Lobby Kiosk ({name})",
+            branch_id=branch.id,
+            mode=DeviceMode.AUTO,
+            status=DeviceStatus.ACTIVE,
+            registered_by=admin_user.id if admin_user else None,
+        )
+        db.add(kiosk_device)
         db.flush()
 
         for index, (code, full_name, department_name, title) in enumerate(_EMPLOYEES):
@@ -83,22 +111,11 @@ def seed_demo_data(db: Session) -> None:
                 branch_id=branch.id if index == 0 else None,
                 shift_id=shift.id if index == 0 else None,
                 job_title=title,
+                pin_hash=hash_pin("1234") if index == 0 else None,
             )
             db.add(employee)
             db.flush()
-
-            # One self-service login so the EMPLOYEE role can be exercised.
-            if code == "E-1001":
-                db.add(
-                    User(
-                        organization_id=organization.id,
-                        email=f"employee@{slug}.demo",
-                        password_hash=hash_password(DEMO_PASSWORD),
-                        full_name=full_name,
-                        role=Role.EMPLOYEE,
-                        employee_id=employee.id,
-                    )
-                )
+            # Employees have NO login accounts in the kiosk-first model.
 
     db.add(
         User(

@@ -1,5 +1,6 @@
 package com.facerem.feature.employees.domain
 
+import com.facerem.core.camera.FaceQualityEvaluator
 import com.facerem.core.common.AppResult
 import com.facerem.core.model.AttendanceRecord
 import com.facerem.core.model.Branch
@@ -29,12 +30,27 @@ interface EmployeeRepository {
     /** Maps to `POST /api/v1/employees`. */
     suspend fun createEmployee(employee: NewEmployee): AppResult<Employee>
 
-    /** Maps to `POST /api/v1/employees/{employeeId}/face/enroll`. */
-    /** @param image a JPEG of a single, front-facing, well-lit face. */
+    /**
+     * Maps to `POST /api/v1/employees/{employeeId}/face/enroll`.
+     * Multi-frame enrollment requires front, left, and right pose captures.
+     */
+    suspend fun submitFaceEnrollment(
+        employeeId: String,
+        frames: Map<FaceQualityEvaluator.HeadPose, ByteArray>,
+    ): AppResult<FaceEnrollmentStatus>
+
+    /** Backwards-compatible single frame overload. */
     suspend fun submitFaceEnrollment(
         employeeId: String,
         image: ByteArray,
-    ): AppResult<FaceEnrollmentStatus>
+    ): AppResult<FaceEnrollmentStatus> = submitFaceEnrollment(
+        employeeId,
+        mapOf(
+            FaceQualityEvaluator.HeadPose.FRONT to image,
+            FaceQualityEvaluator.HeadPose.SLIGHT_LEFT to image,
+            FaceQualityEvaluator.HeadPose.SLIGHT_RIGHT to image,
+        ),
+    )
 
     suspend fun attendanceFor(employeeId: String): AppResult<List<AttendanceRecord>>
 

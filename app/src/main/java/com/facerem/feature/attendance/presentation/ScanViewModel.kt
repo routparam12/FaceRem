@@ -31,6 +31,7 @@ data class ScanUiState(
     val phase: ScanPhase = ScanPhase.SCANNING,
     val quality: FaceQualityStatus = FaceQualityStatus.NO_FACE,
     val stableFrames: Int = 0,
+    val challengePrompt: String? = null,
     val outcome: RecognitionOutcome? = null,
     val isGuest: Boolean = false,
     val errorMessage: String? = null,
@@ -53,7 +54,7 @@ data class ScanUiState(
 
     val guidance: String
         get() = when {
-            phase == ScanPhase.VERIFYING -> "Verifying…"
+            phase == ScanPhase.VERIFYING -> challengePrompt ?: "Verifying…"
             phase == ScanPhase.RESULT -> ""
             awaitingFaceClear -> "Next person, please step up"
             else -> quality.guidance
@@ -107,18 +108,46 @@ class ScanViewModel @Inject constructor(
 
     private fun recognize(captureFrame: suspend () -> ByteArray?) {
         viewModelScope.launch {
+            val challengeResult = attendanceRepository.requestChallenge()
+            val (challengeId, nonce, actions) = when (challengeResult) {
+                is AppResult.Success -> Triple(
+                    challengeResult.data.challengeId,
+                    challengeResult.data.nonce,
+                    challengeResult.data.actions,
+                )
+                else -> Triple(null, null, emptyList())
+            }
+
+            val prompt = actions.firstOrNull()?.let { action ->
+                when (action) {
+                    "BLINK" -> "Please blink"
+                    "TURN_LEFT" -> "Turn slightly left"
+                    "TURN_RIGHT" -> "Turn slightly right"
+                    else -> "Verifying…"
+                }
+            } ?: "Verifying…"
+            mutableUiState.update { it.copy(challengePrompt = prompt) }
+
             val frame = captureFrame()
             if (frame == null || frame.isEmpty()) {
                 showResult(errorMessage = "The camera could not take a picture. Try again.")
                 return@launch
             }
 
+            val burstFrames = mutableListOf<ByteArray>()
+            if (challengeId != null && nonce != null) {
+                repeat(2) {
+                    delay(80)
+                    captureFrame()?.let { if (it.isNotEmpty()) burstFrames.add(it) }
+                }
+            }
+
             when (
                 val result = attendanceRepository.recognize(
                     image = frame,
-                    // The browser-free client has no liveness SDK yet; the server records
-                    // the score it is given and the audit log shows where it came from.
-                    livenessScore = ASSUMED_LIVENESS,
+                    challengeId = challengeId,
+                    nonce = nonce,
+                    burstFrames = burstFrames,
                     deviceLabel = DEVICE_LABEL,
                 )
             ) {
@@ -138,6 +167,7 @@ class ScanViewModel @Inject constructor(
                 phase = ScanPhase.RESULT,
                 outcome = outcome,
                 errorMessage = errorMessage,
+                challengePrompt = null,
                 scanCount = if (outcome != null) it.scanCount + 1 else it.scanCount,
             )
         }
@@ -153,13 +183,10 @@ class ScanViewModel @Inject constructor(
 
     private fun armNextScan() {
         resultJob?.cancel()
-        mutableUiState.update { it.armedForNextScan() }
+        mutableUiState.update { it.armedForNextScan().copy(challengePrompt = null) }
     }
 
     private companion object {
-        //: No liveness SDK on the client yet. The server enforces the threshold and the
-        //: audit log records the device label, so these scans stay identifiable.
-        const val ASSUMED_LIVENESS = 1.0f
         const val DEVICE_LABEL = "android-kiosk"
     }
 }

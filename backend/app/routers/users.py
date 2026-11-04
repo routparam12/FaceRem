@@ -34,6 +34,9 @@ def _user_out(user: User) -> UserOut:
         email=user.email,
         role=user.role,
         employee_id=user.employee_id,
+        branch_id=user.branch_id,
+        department_id=user.department_id,
+        is_totp_enabled=user.is_totp_enabled,
         is_active=user.is_active,
         created_at=user.created_at,
     )
@@ -52,7 +55,7 @@ def _get_org_user(db: Session, organization_id: str, user_id: str) -> User:
 def _count_active_admins(db: Session, organization_id: str, *, excluding: str | None = None) -> int:
     query = select(func.count()).select_from(User).where(
         User.organization_id == organization_id,
-        User.role == Role.ORG_ADMIN,
+        User.role == Role.ORGANIZATION_ADMIN,
         User.is_active.is_(True),
     )
     if excluding is not None:
@@ -83,7 +86,7 @@ def create_user(
     _: Principal = Depends(tenant_scope),
 ) -> UserOut:
     organization_id = principal.organization_id
-    # HR can staff the org but cannot mint another ORG_ADMIN, themselves included.
+    # Staff cannot mint an unauthorized role or assign employee sign-in
     assert_can_assign(principal.role, payload.role)
 
     email = str(payload.email).strip().lower()
@@ -110,6 +113,8 @@ def create_user(
         password_hash=hash_password(payload.password),
         full_name=payload.full_name.strip(),
         role=payload.role,
+        branch_id=payload.branch_id,
+        department_id=payload.department_id,
         employee_id=employee_id,
     )
     db.add(user)
@@ -123,6 +128,8 @@ def create_user(
         target_id=user.id,
         request=request,
         role=user.role.value,
+        branch_id=user.branch_id,
+        department_id=user.department_id,
     )
     db.commit()
     return _user_out(user)
@@ -144,6 +151,32 @@ def update_user(
         user.full_name = payload.full_name.strip()
         changed["full_name"] = True
 
+    if payload.branch_id is not None and payload.branch_id != user.branch_id:
+        user.branch_id = payload.branch_id
+        changed["branch_id"] = payload.branch_id
+        record_audit(
+            db,
+            action="user.scope_changed",
+            principal=principal,
+            target_type="user",
+            target_id=user.id,
+            request=request,
+            branch_id=payload.branch_id,
+        )
+
+    if payload.department_id is not None and payload.department_id != user.department_id:
+        user.department_id = payload.department_id
+        changed["department_id"] = payload.department_id
+        record_audit(
+            db,
+            action="user.scope_changed",
+            principal=principal,
+            target_type="user",
+            target_id=user.id,
+            request=request,
+            department_id=payload.department_id,
+        )
+
     if payload.role is not None and payload.role != user.role:
         # Editing your own role is how a privilege check gets bypassed.
         if user.id == principal.user_id:
@@ -151,19 +184,28 @@ def update_user(
         assert_can_assign(principal.role, payload.role)
         # HR must not be able to demote the admin who manages them.
         assert_can_assign(principal.role, user.role)
-        if user.role is Role.ORG_ADMIN and _count_active_admins(
+        if user.role is Role.ORGANIZATION_ADMIN and _count_active_admins(
             db, principal.organization_id, excluding=user.id
         ) == 0:
             raise AppError("CONFLICT", "The last organization admin cannot be demoted.", 409)
         changed["role"] = payload.role.value
         user.role = payload.role
+        record_audit(
+            db,
+            action="user.role_changed",
+            principal=principal,
+            target_type="user",
+            target_id=user.id,
+            request=request,
+            new_role=payload.role.value,
+        )
 
     if payload.is_active is not None and payload.is_active != user.is_active:
         if user.id == principal.user_id:
             raise AppError("FORBIDDEN", "You cannot deactivate your own account.", 403)
         if not payload.is_active:
             assert_can_assign(principal.role, user.role)
-            if user.role is Role.ORG_ADMIN and _count_active_admins(
+            if user.role is Role.ORGANIZATION_ADMIN and _count_active_admins(
                 db, principal.organization_id, excluding=user.id
             ) == 0:
                 raise AppError(

@@ -23,7 +23,10 @@ enum class Role(val displayName: String) {
         get() = this == ORGANIZATION_ADMIN || this == HR_ADMIN
 
     companion object {
-        fun fromWireValue(value: String?): Role =
-            entries.firstOrNull { it.name.equals(value, ignoreCase = true) } ?: EMPLOYEE
+        fun fromWireValue(value: String?): Role {
+            if (value.isNullOrBlank()) return EMPLOYEE
+            if (value.equals("ORG_ADMIN", ignoreCase = true)) return ORGANIZATION_ADMIN
+            return entries.firstOrNull { it.name.equals(value, ignoreCase = true) } ?: EMPLOYEE
+        }
     }
 }

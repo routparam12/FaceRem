@@ -1,6 +1,7 @@
 export type Role =
   | "SUPER_ADMIN"
   | "ORG_ADMIN"
+  | "ORGANIZATION_ADMIN"
   | "HR_ADMIN"
   | "MANAGER"
   | "EMPLOYEE"
@@ -27,6 +28,7 @@ export interface Employee {
   job_title: string;
   is_active: boolean;
   face_enrolled: boolean;
+  has_pin?: boolean;
 }
 
 export interface AttendanceRecord {
@@ -40,6 +42,14 @@ export interface AttendanceRecord {
   late_minutes: number;
 }
 
+export interface AttentionItem {
+  category: "PROVISIONAL_EVENT" | "OFFLINE_KIOSK" | "UNENROLLED_EMPLOYEE" | string;
+  title: string;
+  description: string;
+  target_id: string;
+  action_url: string;
+}
+
 export interface Dashboard {
   organization_name: string;
   date: string;
@@ -48,9 +58,11 @@ export interface Dashboard {
   late: number;
   not_checked_in: number;
   pending_enrollments: number;
+  provisional_events_count?: number;
+  offline_devices_count?: number;
+  attention_items?: AttentionItem[];
 }
 
-/** ALREADY_PRESENT means the day was already recorded and the scan changed nothing. */
 export type RecognitionEvent = "CHECK_IN" | "CHECK_OUT" | "ALREADY_PRESENT";
 
 export interface RecognitionResult {
@@ -66,6 +78,9 @@ export interface RecognitionResult {
   liveness_score: number;
   check_in_at: string | null;
   check_out_at: string | null;
+  undo_token?: string | null;
+  event_id?: string | null;
+  provisional?: boolean;
 }
 
 export const EVENT_LABELS: Record<RecognitionEvent, string> = {
@@ -73,6 +88,61 @@ export const EVENT_LABELS: Record<RecognitionEvent, string> = {
   CHECK_OUT: "Checked out",
   ALREADY_PRESENT: "Already present",
 };
+
+export interface AttendanceEventItem {
+  id: string;
+  organization_id?: string;
+  employee_id: string;
+  employee_name?: string | null;
+  device_id: string;
+  camera_id?: string | null;
+  source_type: string;
+  type: "CHECK_IN" | "CHECK_OUT" | string;
+  occurred_at: string;
+  confidence?: number;
+  method: "FACE" | "PIN" | string;
+  idempotency_key?: string | null;
+  provisional: boolean;
+  voided_at?: string | null;
+  void_reason?: string | null;
+}
+
+export interface Device {
+  id: string;
+  organization_id: string;
+  name: string;
+  branch_id: string | null;
+  mode: "AUTO" | "IN_ONLY" | "OUT_ONLY";
+  status: "ACTIVE" | "REVOKED";
+  registered_by: string;
+  last_seen_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+}
+
+export interface Camera {
+  id: string;
+  organization_id: string;
+  source_type: "ANDROID_KIOSK" | "EDGE_AGENT";
+  device_id: string;
+  name: string;
+  branch_id: string | null;
+  direction: "IN_ONLY" | "OUT_ONLY" | "AUTO";
+  assurance: "HIGH" | "STANDARD";
+  enabled: boolean;
+  last_seen_at: string | null;
+  created_at: string;
+}
+
+export interface OrganizationSettings {
+  id: string;
+  name: string;
+  slug: string;
+  plan: string;
+  timezone: string;
+  is_active: boolean;
+  created_at: string;
+}
 
 export interface AuditEntry {
   id: string;
@@ -84,13 +154,16 @@ export interface AuditEntry {
   created_at: string;
 }
 
-/** Roles that may manage people and enroll faces, mirroring the server's STAFF_ROLES. */
-export const STAFF_ROLES: Role[] = ["ORG_ADMIN", "HR_ADMIN"];
+export const STAFF_ROLES: Role[] = ["ORG_ADMIN", "ORGANIZATION_ADMIN", "HR_ADMIN"];
 
 export function canManagePeople(role: Role): boolean {
   return STAFF_ROLES.includes(role);
 }
 
 export function canRunScans(role: Role): boolean {
-  return role === "ORG_ADMIN" || role === "HR_ADMIN" || role === "ATTENDANCE_DEVICE";
+  return role === "ORG_ADMIN" || role === "ORGANIZATION_ADMIN" || role === "HR_ADMIN" || role === "ATTENDANCE_DEVICE";
+}
+
+export function isOrgAdmin(role: Role): boolean {
+  return role === "ORG_ADMIN" || role === "ORGANIZATION_ADMIN" || role === "SUPER_ADMIN";
 }

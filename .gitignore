@@ -13,3 +13,9 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+*.db
+.pytest_cache/
+
+
+.env

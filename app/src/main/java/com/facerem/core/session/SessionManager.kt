@@ -7,6 +7,7 @@ import com.facerem.core.model.User
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.map
 
 sealed interface SessionState {
@@ -23,17 +24,21 @@ sealed interface SessionState {
  * reads tokens directly.
  */
 @Singleton
-class SessionManager @Inject constructor(
-    private val preferences: AppPreferences,
+open class SessionManager(
+    private val preferences: AppPreferences?,
+    guestFlow: Flow<Boolean>? = null,
 ) {
-    val state: Flow<SessionState> = preferences.session.map { it.toSessionState() }
+    @Inject
+    constructor(preferences: AppPreferences) : this(preferences, null)
 
-    val currentUser: Flow<User?> = state.map { (it as? SessionState.Authenticated)?.user }
+    open val state: Flow<SessionState> = preferences?.session?.map { it.toSessionState() } ?: emptyFlow()
 
-    val isGuest: Flow<Boolean> = state.map { (it as? SessionState.Authenticated)?.isGuest == true }
+    open val currentUser: Flow<User?> = state.map { (it as? SessionState.Authenticated)?.user }
 
-    suspend fun persist(user: User, accessToken: String?, refreshToken: String?, isGuest: Boolean) {
-        preferences.saveSession(
+    open val isGuest: Flow<Boolean> = guestFlow ?: state.map { (it as? SessionState.Authenticated)?.isGuest == true }
+
+    open suspend fun persist(user: User, accessToken: String?, refreshToken: String?, isGuest: Boolean) {
+        preferences?.saveSession(
             session = StoredSession(
                 accessToken = accessToken,
                 userId = user.id,
@@ -48,7 +53,9 @@ class SessionManager @Inject constructor(
         )
     }
 
-    suspend fun clear() = preferences.clearSession()
+    open suspend fun clear() {
+        preferences?.clearSession()
+    }
 
     private fun StoredSession.toSessionState(): SessionState {
         if (!isActive) return SessionState.SignedOut

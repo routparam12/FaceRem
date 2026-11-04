@@ -5,22 +5,27 @@ Kept out of test_api.py because they load a ~280 MB model: the API suite runs on
 and stays fast, while these prove the thing the product actually sells.
 """
 
+from datetime import datetime, timedelta, timezone
 import io
 import os
-import sys
 from pathlib import Path
+import secrets
+import sys
+import uuid
 
 import numpy as np
-import pytest
 from PIL import Image, ImageEnhance
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 os.environ.setdefault("JWT_SECRET", "test-secret-that-is-long-enough-for-hs256-abcdef")
 
 insightface = pytest.importorskip("insightface", reason="real engine not installed")
+pytestmark = pytest.mark.slow
 
 from app.face import InsightFaceEngine, StubEngine  # noqa: E402
+from app.liveness import ChallengeLivenessService, LivenessChallenge  # noqa: E402
 from app.security import AppError  # noqa: E402
 
 SAMPLES = Path(insightface.__file__).parent / "data" / "images"
@@ -29,6 +34,11 @@ SAMPLES = Path(insightface.__file__).parent / "data" / "images"
 @pytest.fixture(scope="module")
 def engine():
     return InsightFaceEngine()
+
+
+@pytest.fixture
+def liveness_service():
+    return ChallengeLivenessService()
 
 
 def _jpeg(image: Image.Image, quality: int = 70) -> bytes:
@@ -65,6 +75,19 @@ def _similarity(engine, a: bytes, b: bytes) -> float:
     va = np.asarray(engine.embed(a).vector)
     vb = np.asarray(engine.embed(b).vector)
     return float(np.dot(va, vb))
+
+
+def _make_challenge(liveness_service, actions: list[str]) -> LivenessChallenge:
+    c = LivenessChallenge(
+        challenge_id=str(uuid.uuid4()),
+        nonce=secrets.token_hex(16),
+        actions=actions,
+        device_id="dev-1",
+        organization_id="org-1",
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+    )
+    liveness_service._store_challenge(c)
+    return c
 
 
 def test_embeddings_are_unit_length_arcface_vectors(engine, faces):
@@ -156,3 +179,139 @@ def test_arcface_separates_people_far_better_than_the_stub(engine, faces):
         )
 
     assert separation(engine) > separation(StubEngine()) + 0.3
+
+
+def test_static_burst_fails_turn_left_right_and_blink_challenges(engine, faces, liveness_service, monkeypatch):
+    """A static photo repeated across burst frames fails active yaw and blink challenges."""
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "face_engine", "insightface")
+
+    original, _ = faces
+    frame_bytes = _jpeg(original)
+    p_vec = engine.embed(frame_bytes).vector
+
+    # 1. TURN_LEFT with static frames fails (zero yaw change)
+    c_left = _make_challenge(liveness_service, ["TURN_LEFT"])
+    with pytest.raises(AppError) as exc_left:
+        liveness_service.verify_challenge(
+            challenge_id=c_left.challenge_id,
+            nonce=c_left.nonce,
+            device_id="dev-1",
+            organization_id="org-1",
+            burst_frames=[frame_bytes, frame_bytes],
+            primary_vector=p_vec,
+        )
+    assert exc_left.value.code == "LIVENESS_FAILED"
+    assert "left turn was not detected" in exc_left.value.message
+
+    # 2. TURN_RIGHT with static frames fails (zero yaw change)
+    c_right = _make_challenge(liveness_service, ["TURN_RIGHT"])
+    with pytest.raises(AppError) as exc_right:
+        liveness_service.verify_challenge(
+            challenge_id=c_right.challenge_id,
+            nonce=c_right.nonce,
+            device_id="dev-1",
+            organization_id="org-1",
+            burst_frames=[frame_bytes, frame_bytes],
+            primary_vector=p_vec,
+        )
+    assert exc_right.value.code == "LIVENESS_FAILED"
+    assert "right turn was not detected" in exc_right.value.message
+
+    # 3. BLINK with static frames fails (zero EAR drop)
+    c_blink = _make_challenge(liveness_service, ["BLINK"])
+    with pytest.raises(AppError) as exc_blink:
+        liveness_service.verify_challenge(
+            challenge_id=c_blink.challenge_id,
+            nonce=c_blink.nonce,
+            device_id="dev-1",
+            organization_id="org-1",
+            burst_frames=[frame_bytes, frame_bytes],
+            primary_vector=p_vec,
+        )
+    assert exc_blink.value.code == "LIVENESS_FAILED"
+    assert "blink action was not detected" in exc_blink.value.message
+
+
+def test_burst_identity_change_mid_burst_fails(engine, faces, liveness_service, monkeypatch):
+    """A burst where the face identity changes mid-burst fails with identity shift."""
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "face_engine", "insightface")
+
+    person_a, person_b = faces
+    bytes_a, bytes_b = _jpeg(person_a), _jpeg(person_b)
+    p_vec = engine.embed(bytes_a).vector
+
+    c = _make_challenge(liveness_service, ["TURN_LEFT"])
+
+    # Burst alternates between two different people
+    with pytest.raises(AppError) as exc:
+        liveness_service.verify_challenge(
+            challenge_id=c.challenge_id,
+            nonce=c.nonce,
+            device_id="dev-1",
+            organization_id="org-1",
+            burst_frames=[bytes_a, bytes_b],
+            primary_vector=p_vec,
+        )
+    assert exc.value.code == "LIVENESS_FAILED"
+    assert "Face identity shifted" in exc.value.message
+
+
+def test_burst_belonging_to_different_person_than_primary_fails(engine, faces, liveness_service, monkeypatch):
+    """A burst where frames are genuine but belong to a different person than primary fails."""
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "face_engine", "insightface")
+
+    person_a, person_b = faces
+    bytes_a, bytes_b = _jpeg(person_a), _jpeg(person_b)
+    p_vec_a = engine.embed(bytes_a).vector
+
+    c = _make_challenge(liveness_service, ["TURN_LEFT"])
+
+    # Primary is person_a, burst frames belong entirely to person_b
+    with pytest.raises(AppError) as exc:
+        liveness_service.verify_challenge(
+            challenge_id=c.challenge_id,
+            nonce=c.nonce,
+            device_id="dev-1",
+            organization_id="org-1",
+            burst_frames=[bytes_b, bytes_b],
+            primary_vector=p_vec_a,
+        )
+    assert exc.value.code == "LIVENESS_FAILED"
+    assert "Face identity shifted" in exc.value.message
+
+
+def test_pose_verification_rejects_frontal_frame_submitted_as_left_or_right(engine, faces):
+    """Server checks estimated yaw angles from engine, rejecting frontal frame submitted as LEFT or RIGHT."""
+    front_face, _ = faces
+    front_bytes = _jpeg(front_face)
+
+    # 1. FRONT succeeds (|yaw| <= 15.0)
+    front_embed = engine.embed(front_bytes, expected_pose="FRONT")
+    assert front_embed.pose == "FRONT"
+    assert abs(front_embed.yaw) <= 15.0
+
+    # 2. Submitted as LEFT -> rejected (yaw > -10.0)
+    with pytest.raises(AppError) as exc_left:
+        engine.embed(front_bytes, expected_pose="LEFT")
+    assert exc_left.value.code == "FACE_QUALITY_LOW"
+    assert exc_left.value.reason == "POSE_MISMATCH"
+
+    # 3. Submitted as RIGHT -> rejected (yaw < 10.0)
+    with pytest.raises(AppError) as exc_right:
+        engine.embed(front_bytes, expected_pose="RIGHT")
+    assert exc_right.value.code == "FACE_QUALITY_LOW"
+    assert exc_right.value.reason == "POSE_MISMATCH"
+
+    # 4. Turned face (Tom Hanks, yaw ~ 25.8°) submitted as RIGHT succeeds; submitted as FRONT is rejected
+    hanks_bytes = (SAMPLES / "Tom_Hanks_54745.png").read_bytes()
+    right_embed = engine.embed(hanks_bytes, expected_pose="RIGHT")
+    assert right_embed.pose == "RIGHT"
+    assert right_embed.yaw >= 10.0
+
+    with pytest.raises(AppError) as exc_front:
+        engine.embed(hanks_bytes, expected_pose="FRONT")
+    assert exc_front.value.code == "FACE_QUALITY_LOW"
+    assert exc_front.value.reason == "POSE_MISMATCH"

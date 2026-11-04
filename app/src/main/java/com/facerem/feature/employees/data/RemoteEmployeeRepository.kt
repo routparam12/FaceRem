@@ -1,5 +1,6 @@
 package com.facerem.feature.employees.data
 
+import com.facerem.core.camera.FaceQualityEvaluator
 import com.facerem.core.common.AppResult
 import com.facerem.core.model.AttendanceRecord
 import com.facerem.core.model.Branch
@@ -50,16 +51,34 @@ class RemoteEmployeeRepository @Inject constructor(
 
     override suspend fun submitFaceEnrollment(
         employeeId: String,
-        image: ByteArray,
+        frames: Map<FaceQualityEvaluator.HeadPose, ByteArray>,
     ): AppResult<FaceEnrollmentStatus> = apiCall.invoke {
+        val frontBytes = frames[FaceQualityEvaluator.HeadPose.FRONT] ?: ByteArray(0)
+        val leftBytes = frames[FaceQualityEvaluator.HeadPose.SLIGHT_LEFT] ?: ByteArray(0)
+        val rightBytes = frames[FaceQualityEvaluator.HeadPose.SLIGHT_RIGHT] ?: ByteArray(0)
+
         api.enrollFace(
             id = employeeId,
-            image = image.asImagePart(),
+            front = frontBytes.asImagePart("front"),
+            left = leftBytes.asImagePart("left"),
+            right = rightBytes.asImagePart("right"),
             // Consent is collected on the device before the camera opens; the server
             // records it against the profile and refuses enrollment without it.
             consent = "true".toRequestBody(TEXT),
         )
     }.map { if (it.faceEnrolled) FaceEnrollmentStatus.ENROLLED else FaceEnrollmentStatus.PENDING }
+
+    override suspend fun submitFaceEnrollment(
+        employeeId: String,
+        image: ByteArray,
+    ): AppResult<FaceEnrollmentStatus> = submitFaceEnrollment(
+        employeeId,
+        mapOf(
+            FaceQualityEvaluator.HeadPose.FRONT to image,
+            FaceQualityEvaluator.HeadPose.SLIGHT_LEFT to image,
+            FaceQualityEvaluator.HeadPose.SLIGHT_RIGHT to image,
+        ),
+    )
 
     override suspend fun attendanceFor(employeeId: String): AppResult<List<AttendanceRecord>> =
         apiCall.invoke { api.attendance() }
@@ -83,7 +102,7 @@ internal val TEXT = "text/plain".toMediaType()
 internal fun ByteArray.asImagePart(name: String = "image"): MultipartBody.Part =
     MultipartBody.Part.createFormData(
         name,
-        "capture.jpg",
+        "$name.jpg",
         toRequestBody("image/jpeg".toMediaType()),
     )
 

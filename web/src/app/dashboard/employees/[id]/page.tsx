@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import EmployeeActions from "@/components/employee-actions";
 import EnrollPanel from "@/components/enroll-panel";
 import {
   Avatar,
@@ -41,8 +42,17 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
           <p className="mt-0.5 text-sm text-ink-500">
             {employee.job_title || "No job title"} · {employee.department}
           </p>
-          <div className="mt-2">
+          <div className="mt-2 flex items-center gap-2">
             <EnrollmentPill enrolled={employee.face_enrolled} />
+            <span
+              className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                employee.is_active
+                  ? "bg-emerald-50 text-emerald-700"
+                  : "bg-rose-50 text-rose-700"
+              }`}
+            >
+              {employee.is_active ? "Active" : "Inactive"}
+            </span>
           </div>
         </div>
       </div>
@@ -76,6 +86,10 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
           </Card>
         )}
       </div>
+
+      {canManagePeople(me.role) && (
+        <EmployeeActions employeeId={employee.id} isActive={employee.is_active} />
+      )}
 
       <section>
         <SectionTitle>Recent attendance</SectionTitle>

@@ -2,13 +2,13 @@ import json
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from .routers import attendance, auth, employees, org, users
+from .routers import attendance, auth, devices, employees, org, reports, users
 from .config import get_settings
 from .db import SessionLocal, engine
 from .security import AppError
@@ -30,9 +30,56 @@ def _assert_schema_exists() -> None:
         )
 
 
+def _assert_production_requirements() -> None:
+    """Refuse to start in production without essential security infrastructure."""
+    if not settings.is_production:
+        return
+    if not settings.redis_url:
+        raise RuntimeError(
+            "Production mode requires REDIS_URL to be configured for distributed rate limiting."
+        )
+    try:
+        import redis
+        client = redis.Redis.from_url(settings.redis_url, socket_timeout=2)
+        client.ping()
+    except Exception as exc:
+        raise RuntimeError(
+            f"Production mode requires a reachable Redis instance for distributed rate limiting: {exc}"
+        ) from exc
+    if settings.face_engine == "stub":
+        raise RuntimeError("FACE_ENGINE='stub' is forbidden in production mode. Set FACE_ENGINE='insightface'.")
+    if settings.liveness_mode == "disabled":
+        raise RuntimeError("LIVENESS_MODE='disabled' is forbidden in production mode.")
+    if not settings.allow_unconfigured_passive_liveness:
+        raise RuntimeError(
+            "Production mode requires a configured passive liveness model or ALLOW_UNCONFIGURED_PASSIVE_LIVENESS=true override."
+        )
+    with SessionLocal() as db:
+        if db.bind.dialect.name == "postgresql":
+            ext = db.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")).first()
+            if not ext:
+                raise RuntimeError(
+                    "Production mode on PostgreSQL requires the 'vector' (pgvector) extension to be active. "
+                    "Install pgvector and run: CREATE EXTENSION IF NOT EXISTS vector;"
+                )
+            insp = inspect(db.bind)
+            cols = {c["name"]: c for c in insp.get_columns("face_profiles")}
+            if "embedding_vec" not in cols:
+                raise RuntimeError(
+                    "Production mode requires the 'embedding_vec' column in 'face_profiles'. Run alembic upgrade head."
+                )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _assert_schema_exists()
+    _assert_production_requirements()
+    if settings.face_engine == "insightface":
+        try:
+            from .face import warmup_engine
+            warmup_engine()
+        except Exception:
+            pass
     if settings.seed_demo_data:
         with SessionLocal() as db:
             seed_demo_data(db)
@@ -54,16 +101,19 @@ app.add_middleware(
 )
 
 
-def _error(status_code: int, code: str, message: str) -> JSONResponse:
+def _error(status_code: int, code: str, message: str, reason: str | None = None) -> JSONResponse:
+    err_obj = {"code": code, "message": message}
+    if reason:
+        err_obj["reason"] = reason
     return JSONResponse(
         status_code=status_code,
-        content={"success": False, "error": {"code": code, "message": message}},
+        content={"success": False, "error": err_obj},
     )
 
 
 @app.exception_handler(AppError)
 async def handle_app_error(_: Request, exc: AppError) -> JSONResponse:
-    return _error(exc.status_code, exc.code, exc.message)
+    return _error(exc.status_code, exc.code, exc.message, exc.reason)
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -106,9 +156,11 @@ def health() -> dict:
 
 for _router, _tag in (
     (auth.router, "auth"),
+    (devices.router, "devices"),
     (employees.router, "employees"),
     (attendance.router, "attendance"),
     (org.router, "organization"),
+    (reports.router, "reports"),
     (users.router, "users"),
 ):
     app.include_router(_router, prefix="/api/v1", tags=[_tag])

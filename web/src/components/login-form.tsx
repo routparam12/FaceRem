@@ -12,6 +12,9 @@ export default function LoginForm({ sessionExpired }: { sessionExpired: boolean 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [organization, setOrganization] = useState("");
+  const [totpCode, setTotpCode] = useState("");
+  const [challengeToken, setChallengeToken] = useState<string | null>(null);
+  const [is2faStep, setIs2faStep] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -21,6 +24,27 @@ export default function LoginForm({ sessionExpired }: { sessionExpired: boolean 
     setError(null);
 
     try {
+      if (is2faStep && challengeToken) {
+        // Step 2: verify 2FA code (authenticator app or recovery code)
+        const response = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            challenge_token: challengeToken,
+            code: totpCode,
+          }),
+        });
+        const body = await response.json();
+        if (!response.ok || !body.ok) {
+          setError(body.message ?? "Invalid authentication code.");
+          return;
+        }
+        router.replace("/dashboard");
+        router.refresh();
+        return;
+      }
+
+      // Step 1: primary email + password
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -28,11 +52,18 @@ export default function LoginForm({ sessionExpired }: { sessionExpired: boolean 
       });
       const body = await response.json();
 
-      if (!response.ok) {
+      if (!response.ok || !body.ok) {
         setError(body.message ?? "Sign in failed.");
         return;
       }
-      // The session lives in httpOnly cookies, so a refresh is what makes it visible.
+
+      if (body.totp_required && body.challenge_token) {
+        setChallengeToken(body.challenge_token);
+        setIs2faStep(true);
+        return;
+      }
+
+      // The session lives in httpOnly cookies, so a refresh makes it visible
       router.replace("/dashboard");
       router.refresh();
     } catch {
@@ -40,6 +71,48 @@ export default function LoginForm({ sessionExpired }: { sessionExpired: boolean 
     } finally {
       setPending(false);
     }
+  }
+
+  if (is2faStep) {
+    return (
+      <form onSubmit={handleSubmit} className="mt-8 space-y-4">
+        <div className="rounded-xl border border-brand-200 bg-brand-50/50 p-4">
+          <p className="text-sm font-semibold text-brand-900">Two-Factor Authentication Required</p>
+          <p className="mt-1 text-xs text-brand-700">
+            Enter the 6-digit verification code from your authenticator app (Google Authenticator, Authy) or an 8-character recovery code.
+          </p>
+        </div>
+
+        <Field
+          label="Verification or recovery code"
+          required
+          autoFocus
+          value={totpCode}
+          onChange={(event) => setTotpCode(event.target.value)}
+          placeholder="123456 or ABCDEF12"
+          autoComplete="one-time-code"
+        />
+
+        {error && <Banner tone="danger">{error}</Banner>}
+
+        <Button type="submit" className="w-full" disabled={pending || !totpCode.trim()}>
+          {pending ? "Verifying…" : "Confirm Sign In"}
+        </Button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setIs2faStep(false);
+            setChallengeToken(null);
+            setTotpCode("");
+            setError(null);
+          }}
+          className="w-full text-center text-xs font-medium text-ink-500 hover:text-ink-700"
+        >
+          ← Back to password sign in
+        </button>
+      </form>
+    );
   }
 
   return (

@@ -3,6 +3,7 @@ package com.facerem.feature.attendance.data
 import com.facerem.core.common.AppError
 import com.facerem.core.common.AppResult
 import com.facerem.core.model.AttendanceRecord
+import com.facerem.core.model.LivenessChallenge
 import com.facerem.core.model.RecognitionOutcome
 import com.facerem.core.network.ApiCall
 import com.facerem.core.network.api.FaceAttendApi
@@ -14,6 +15,8 @@ import com.facerem.feature.employees.data.asImagePart
 import com.facerem.feature.employees.data.map
 import javax.inject.Inject
 import javax.inject.Singleton
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
 
 @Singleton
@@ -22,15 +25,35 @@ class RemoteAttendanceRepository @Inject constructor(
     private val apiCall: ApiCall,
 ) : AttendanceRepository {
 
+    override suspend fun requestChallenge(): AppResult<LivenessChallenge> =
+        apiCall.invoke { api.challenge() }.map {
+            LivenessChallenge(
+                challengeId = it.challengeId,
+                nonce = it.nonce,
+                actions = it.actions,
+            )
+        }
+
     override suspend fun recognize(
         image: ByteArray,
-        livenessScore: Float,
+        challengeId: String?,
+        nonce: String?,
+        burstFrames: List<ByteArray>,
         deviceLabel: String,
     ): AppResult<RecognitionOutcome> {
+        val burstParts = burstFrames.mapIndexed { idx, bytes ->
+            MultipartBody.Part.createFormData(
+                "burst",
+                "burst_$idx.jpg",
+                bytes.toRequestBody("image/jpeg".toMediaType()),
+            )
+        }
         val result = apiCall.invoke {
             api.recognize(
                 image = image.asImagePart(),
-                livenessScore = livenessScore.toString().toRequestBody(TEXT),
+                challengeId = challengeId?.toRequestBody(TEXT),
+                nonce = nonce?.toRequestBody(TEXT),
+                burst = burstParts,
                 deviceLabel = deviceLabel.toRequestBody(TEXT),
             )
         }

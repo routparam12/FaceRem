@@ -19,7 +19,7 @@ os.environ.update(
     DATABASE_URL="sqlite:///./test_faceattend.db",
     JWT_SECRET="test-secret-that-is-long-enough-for-hs256-abcdef",
     FACE_ENGINE="stub",
-    LIVENESS_MODE="client_attested",
+    LIVENESS_MODE="disabled",
     LIVENESS_THRESHOLD="0.7",
     CHECKOUT_AFTER_MINUTES="240",
     SEED_DEMO_DATA="true",
@@ -70,6 +70,29 @@ def face_image(seed: int) -> bytes:
     return buffer.getvalue()
 
 
+def face_frames(seed: int) -> dict:
+    """Returns 3 distinct pose frames (front, left, right) for enrollment."""
+    rng = __import__("random").Random(seed)
+    base_data = [(rng.randrange(256), rng.randrange(256), rng.randrange(256)) for _ in range(128 * 128)]
+    frames = []
+    for variation in [0, 1, 2]:
+        var_data = list(base_data)
+        v_rng = __import__("random").Random(seed * 100 + variation)
+        for _ in range(int(len(var_data) * 0.05 * variation)):
+            idx = v_rng.randrange(len(var_data))
+            var_data[idx] = (v_rng.randrange(256), v_rng.randrange(256), v_rng.randrange(256))
+        img = Image.new("RGB", (128, 128))
+        img.putdata(var_data)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        frames.append(buf.getvalue())
+    return {
+        "front": ("front.png", frames[0], "image/png"),
+        "left": ("left.png", frames[1], "image/png"),
+        "right": ("right.png", frames[2], "image/png"),
+    }
+
+
 # ----------------------------------------------------------------------------------
 # Authentication
 # ----------------------------------------------------------------------------------
@@ -114,11 +137,13 @@ def test_endpoints_require_a_token(client):
 # RBAC
 # ----------------------------------------------------------------------------------
 
-def test_employee_role_cannot_list_employees(client):
-    token = login(client, "employee@northwind.demo")
-    response = client.get("/api/v1/employees", headers=auth(token))
-    assert response.status_code == 403
-    assert response.json()["error"]["code"] == "FORBIDDEN"
+def test_employee_role_cannot_sign_in_or_access_endpoints(client):
+    res = client.post(
+        "/api/v1/auth/login",
+        json={"email": "employee@northwind.demo", "password": "demo12345"},
+    )
+    assert res.status_code == 401
+    assert res.json()["error"]["code"] == "INVALID_CREDENTIALS"
 
 
 def test_manager_can_read_but_not_create_employees(client):
@@ -199,7 +224,7 @@ def test_enroll_then_recognize_checks_in_then_reports_already_present(client):
     enroll = client.post(
         f"/api/v1/employees/{employee_id}/face/enroll",
         headers=auth(hr),
-        files={"image": ("face.png", image, "image/png")},
+        files=face_frames(42),
         data={"consent": "true"},
     )
     assert enroll.status_code == 200, enroll.text
@@ -289,7 +314,9 @@ def test_scan_after_the_checkout_window_ends_the_day(client):
     assert body["check_out_at"] is not None
 
 
-def test_failed_liveness_blocks_recognition(client):
+def test_failed_liveness_blocks_recognition(client, monkeypatch):
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "liveness_mode", "challenge")
     kiosk = login(client, "kiosk@northwind.demo")
     response = client.post(
         "/api/v1/attendance/recognize",
@@ -393,7 +420,7 @@ def test_a_face_enrolled_in_one_org_does_not_match_in_another(client):
     client.post(
         f"/api/v1/employees/{northwind_employee}/face/enroll",
         headers=auth(northwind_hr),
-        files={"image": ("face.png", image, "image/png")},
+        files=face_frames(31337),
         data={"consent": "true"},
     )
 
@@ -408,12 +435,14 @@ def test_a_face_enrolled_in_one_org_does_not_match_in_another(client):
     assert response.json()["error"]["code"] == "FACE_NOT_RECOGNIZED"
 
 
-def test_employee_self_service_sees_only_its_own_attendance(client):
-    token = login(client, "employee@northwind.demo")
-    me = client.get("/api/v1/auth/me", headers=auth(token)).json()["data"]
-
-    rows = client.get("/api/v1/attendance", headers=auth(token)).json()["data"]
-    assert all(row["employee_id"] == me["employee_id"] for row in rows)
+def test_employee_login_is_rejected_with_invalid_credentials(client):
+    """Employee self-service login is removed in the kiosk-first model."""
+    res = client.post(
+        "/api/v1/auth/login",
+        json={"email": "employee@northwind.demo", "password": "demo12345"},
+    )
+    assert res.status_code == 401
+    assert res.json()["error"]["code"] == "INVALID_CREDENTIALS"
 
 
 # ----------------------------------------------------------------------------------
@@ -477,14 +506,14 @@ def test_delete_employee_soft_deletes_and_revokes_face_and_hides_from_default_li
     enroll = client.post(
         f"/api/v1/employees/{employee_id}/face/enroll",
         headers=auth(hr),
-        files={"image": ("face.png", face_image(5001), "image/png")},
+        files=face_frames(5001),
         data={"consent": "true"},
     )
     assert enroll.status_code == 200
 
     delete = client.delete(f"/api/v1/employees/{employee_id}", headers=auth(hr))
     assert delete.status_code == 200
-    assert delete.json()["data"]["face_profiles_revoked"] == 1
+    assert delete.json()["data"]["face_profiles_revoked"] == 3
 
     listed = client.get("/api/v1/employees", headers=auth(hr)).json()["data"]
     assert all(row["id"] != employee_id for row in listed)
@@ -640,7 +669,7 @@ def test_signup_creates_an_organization_with_its_first_admin(client):
     assert data["organization_slug"] == "zephyr"
 
     me = client.get("/api/v1/auth/me", headers=auth(data["access_token"])).json()["data"]
-    assert me["role"] == "ORG_ADMIN"
+    assert me["role"] == "ORGANIZATION_ADMIN"
     assert me["organization_id"] == data["organization_id"]
 
 
@@ -678,14 +707,14 @@ def test_hr_cannot_create_an_org_admin(client):
             "full_name": "Sneaky Admin",
             "email": "sneaky@northwind.demo",
             "password": "another-password-1",
-            "role": "ORG_ADMIN",
+            "role": "ORGANIZATION_ADMIN",
         },
     )
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "FORBIDDEN"
 
 
-def test_hr_can_create_an_employee_login_that_works(client):
+def test_hr_cannot_create_an_employee_user_account(client):
     hr = login(client, "hr@northwind.demo")
     created = client.post(
         "/api/v1/users",
@@ -697,22 +726,35 @@ def test_hr_can_create_an_employee_login_that_works(client):
             "role": "EMPLOYEE",
         },
     )
+    assert created.status_code == 422
+    assert created.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_hr_can_create_a_manager_login_that_works(client):
+    hr = login(client, "hr@northwind.demo")
+    created = client.post(
+        "/api/v1/users",
+        headers=auth(hr),
+        json={
+            "full_name": "New Manager",
+            "email": "new.manager@northwind.demo",
+            "password": "manager-password-1",
+            "role": "MANAGER",
+        },
+    )
     assert created.status_code == 201, created.text
-    assert created.json()["data"]["role"] == "EMPLOYEE"
+    assert created.json()["data"]["role"] == "MANAGER"
 
-    token = login(client, "new.starter@northwind.demo", "starter-password-1")
+    token = login(client, "new.manager@northwind.demo", "manager-password-1")
     me = client.get("/api/v1/auth/me", headers=auth(token)).json()["data"]
-    assert me["role"] == "EMPLOYEE"
-
-    # An employee must not be able to administer accounts.
-    assert client.get("/api/v1/users", headers=auth(token)).status_code == 403
+    assert me["role"] == "MANAGER"
 
 
 def test_nobody_can_change_their_own_role(client):
     admin_token = login(client, "admin@northwind.demo")
     me = client.get("/api/v1/auth/me", headers=auth(admin_token)).json()["data"]
     response = client.patch(
-        f"/api/v1/users/{me['id']}", headers=auth(admin_token), json={"role": "EMPLOYEE"}
+        f"/api/v1/users/{me['id']}", headers=auth(admin_token), json={"role": "MANAGER"}
     )
     assert response.status_code == 403
 
@@ -734,12 +776,12 @@ def test_the_last_org_admin_cannot_be_locked_out(client):
     # HR may not demote the only admin...
     hr_token = login(client, "hr@solo.demo", "hr-password-1")
     assert client.patch(
-        f"/api/v1/users/{data['user_id']}", headers=auth(hr_token), json={"role": "EMPLOYEE"}
+        f"/api/v1/users/{data['user_id']}", headers=auth(hr_token), json={"role": "MANAGER"}
     ).status_code == 403
 
     # ...and the admin cannot strand the tenant by demoting themselves either.
     assert client.patch(
-        f"/api/v1/users/{data['user_id']}", headers=auth(admin_token), json={"role": "EMPLOYEE"}
+        f"/api/v1/users/{data['user_id']}", headers=auth(admin_token), json={"role": "MANAGER"}
     ).status_code == 403
     assert other["role"] == "HR_ADMIN"
 

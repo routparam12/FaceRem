@@ -300,6 +300,26 @@ Cleartext HTTP is permitted only in debug builds — `app/src/debug/res/xml/netw
 replaces the restrictive config in `src/main` for debug, so release builds still require TLS
 with no exemption.
 
+## Testing
+
+The project uses `pytest` with a `@pytest.mark.slow` marker distinguishing fast unit/integration tests from heavy ML inference (`InsightFaceEngine` ArcFace loading) and live PostgreSQL tests.
+
+### Running Tests
+
+```powershell
+# 1. Fast Suite (recommended during development):
+& .\backend\.venv\Scripts\python.exe -m pytest backend/tests -m "not slow" -v
+
+# 2. Single test file (e.g. attendance or auth):
+& .\backend\.venv\Scripts\python.exe -m pytest backend/tests/test_phase4_attendance.py -v
+
+# 3. Full Suite (including ML model inference):
+& .\backend\.venv\Scripts\python.exe -m pytest backend/tests -v
+```
+
+> **Windows Sandbox Note:**
+> On Windows, Starlette / FastAPI's `TestClient` uses an internal `asyncio` event loop whose `socketpair()` creates a loopback TCP connection on `127.0.0.1`. Under strict sandbox isolation with loopback networking blocked, `TestClient.__enter__()` hangs waiting for the socket pair handshake. When running tests in automation or agents on Windows, always execute tests outside network isolation (`BypassSandbox: true`).
+
 ## Layout
 
 Routes are grouped by what they act on, so nothing is a thousand-line file:

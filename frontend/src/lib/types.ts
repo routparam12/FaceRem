@@ -1,6 +1,7 @@
 export type Role =
   | "SUPER_ADMIN"
   | "ORG_ADMIN"
+  | "ORGANIZATION_ADMIN"
   | "HR_ADMIN"
   | "MANAGER"
   | "EMPLOYEE"
@@ -85,12 +86,12 @@ export interface AuditEntry {
 }
 
 /** Roles that may manage people and enroll faces, mirroring the server's STAFF_ROLES. */
-export const STAFF_ROLES: Role[] = ["ORG_ADMIN", "HR_ADMIN"];
+export const STAFF_ROLES: Role[] = ["ORG_ADMIN", "ORGANIZATION_ADMIN", "HR_ADMIN"];
 
 export function canManagePeople(role: Role): boolean {
   return STAFF_ROLES.includes(role);
 }
 
 export function canRunScans(role: Role): boolean {
-  return role === "ORG_ADMIN" || role === "HR_ADMIN" || role === "ATTENDANCE_DEVICE";
+  return role === "ORG_ADMIN" || role === "ORGANIZATION_ADMIN" || role === "HR_ADMIN" || role === "ATTENDANCE_DEVICE";
 }

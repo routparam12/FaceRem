@@ -15,7 +15,7 @@ function tone(action: string): string {
 
 export default async function AuditPage() {
   const me = await apiGet<Me>("/api/v1/auth/me");
-  if (me.role !== "ORG_ADMIN") redirect("/dashboard");
+  if (me.role !== "ORG_ADMIN" && me.role !== "ORGANIZATION_ADMIN") redirect("/dashboard");
 
   const entries = await apiGet<AuditEntry[]>("/api/v1/audit-logs?limit=100");
 

@@ -3,6 +3,7 @@ package com.facerem.feature.attendance.data
 import com.facerem.core.common.AppResult
 import com.facerem.core.data.demo.DemoDataStore
 import com.facerem.core.model.AttendanceRecord
+import com.facerem.core.model.LivenessChallenge
 import com.facerem.core.model.RecognitionOutcome
 import com.facerem.feature.attendance.domain.AttendanceRepository
 import javax.inject.Inject
@@ -12,9 +13,22 @@ class DemoAttendanceRepository @Inject constructor(
     private val demoDataStore: DemoDataStore,
 ) : AttendanceRepository {
 
+    override suspend fun requestChallenge(): AppResult<LivenessChallenge> {
+        delay(150)
+        return AppResult.Success(
+            LivenessChallenge(
+                challengeId = "demo-chal-${System.currentTimeMillis()}",
+                nonce = "demo-nonce",
+                actions = listOf("BLINK"),
+            ),
+        )
+    }
+
     override suspend fun recognize(
         image: ByteArray,
-        livenessScore: Float,
+        challengeId: String?,
+        nonce: String?,
+        burstFrames: List<ByteArray>,
         deviceLabel: String,
     ): AppResult<RecognitionOutcome> {
         // The demo never looks at the frame; it picks a plausible employee instead.

@@ -8,17 +8,46 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .models import Employee, FaceProfile, Role, Subscription
-from .security import AppError
+from .security import AppError, Principal
 
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
-#: Who may manage people and enroll faces.
-STAFF_ROLES = (Role.ORG_ADMIN, Role.HR_ADMIN)
+#: Who may manage people, devices, and enroll faces.
+STAFF_ROLES = (Role.ORGANIZATION_ADMIN, Role.HR_ADMIN)
 #: Who may read organization-wide attendance.
-VIEWER_ROLES = (Role.ORG_ADMIN, Role.HR_ADMIN, Role.MANAGER)
+VIEWER_ROLES = (Role.ORGANIZATION_ADMIN, Role.HR_ADMIN, Role.MANAGER)
 #: Who may run a recognition scan. A kiosk device has its own credential.
-SCANNER_ROLES = (Role.ATTENDANCE_DEVICE, Role.ORG_ADMIN, Role.HR_ADMIN)
+SCANNER_ROLES = (Role.ATTENDANCE_DEVICE, Role.ORGANIZATION_ADMIN, Role.HR_ADMIN)
+
+
+def check_scope(
+    principal: Principal,
+    *,
+    branch_id: str | None = None,
+    department_id: str | None = None,
+) -> None:
+    """
+    Enforces branch and department scoping for HR_ADMIN and MANAGER.
+    ORGANIZATION_ADMIN and ATTENDANCE_DEVICE have no internal department/branch restrictions.
+    SUPER_ADMIN has no tenant access.
+    """
+    if principal.role is Role.SUPER_ADMIN:
+        raise AppError("FORBIDDEN", "Platform operators cannot access tenant data.", 403)
+    if principal.role is Role.ORGANIZATION_ADMIN or principal.role is Role.ATTENDANCE_DEVICE:
+        return
+    if principal.role in (Role.HR_ADMIN, Role.MANAGER):
+        if principal.branch_id is not None and branch_id is not None and principal.branch_id != branch_id:
+            raise AppError("FORBIDDEN", "You do not have access to resources in this branch.", 403)
+        if principal.department_id is not None and department_id is not None and principal.department_id != department_id:
+            raise AppError("FORBIDDEN", "You do not have access to resources in this department.", 403)
+
+
+def get_scoped_employee(db: Session, principal: Principal, employee_id: str) -> Employee:
+    """Loads an employee inside caller's organization, verifies scope, or 404s/403s."""
+    employee = get_org_employee(db, principal.organization_id, employee_id)
+    check_scope(principal, branch_id=employee.branch_id, department_id=employee.department_id)
+    return employee
 
 
 def revoke_active_face_profiles(db: Session, employee: Employee, now: datetime) -> int:

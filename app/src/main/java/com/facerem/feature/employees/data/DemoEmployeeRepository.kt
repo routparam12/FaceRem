@@ -1,5 +1,6 @@
 package com.facerem.feature.employees.data
 
+import com.facerem.core.camera.FaceQualityEvaluator
 import com.facerem.core.common.AppError
 import com.facerem.core.common.AppResult
 import com.facerem.core.data.demo.DemoDataStore
@@ -61,17 +62,29 @@ class DemoEmployeeRepository @Inject constructor(
 
     override suspend fun submitFaceEnrollment(
         employeeId: String,
-        image: ByteArray,
+        frames: Map<FaceQualityEvaluator.HeadPose, ByteArray>,
     ): AppResult<FaceEnrollmentStatus> {
         delay(1_200)
-        if (image.isEmpty()) {
+        if (frames.size < 3 || frames.values.any { it.isEmpty() }) {
             return AppResult.Error(
-                AppError.Api("FACE_QUALITY_LOW", "No frame was captured.", httpStatus = 422),
+                AppError.Api("INSUFFICIENT_FRAMES", "Enrollment requires 3 valid frames.", httpStatus = 422),
             )
         }
         demoDataStore.updateEnrollment(employeeId, FaceEnrollmentStatus.ENROLLED)
         return AppResult.Success(FaceEnrollmentStatus.ENROLLED)
     }
+
+    override suspend fun submitFaceEnrollment(
+        employeeId: String,
+        image: ByteArray,
+    ): AppResult<FaceEnrollmentStatus> = submitFaceEnrollment(
+        employeeId,
+        mapOf(
+            FaceQualityEvaluator.HeadPose.FRONT to image,
+            FaceQualityEvaluator.HeadPose.SLIGHT_LEFT to image,
+            FaceQualityEvaluator.HeadPose.SLIGHT_RIGHT to image,
+        ),
+    )
 
     override suspend fun attendanceFor(employeeId: String): AppResult<List<AttendanceRecord>> {
         delay(300)
@@ -83,5 +96,4 @@ class DemoEmployeeRepository @Inject constructor(
     override suspend fun branches(): List<Branch> = demoDataStore.branches
 
     override suspend fun shifts(): List<Shift> = demoDataStore.shifts
-
 }
