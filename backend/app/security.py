@@ -18,7 +18,6 @@ from .config import get_settings
 from .db import get_db
 from .models import AttendanceDevice, AuditLog, DeviceStatus, RefreshToken, Role, User
 
-settings = get_settings()
 bearer_scheme = HTTPBearer(auto_error=False)
 
 SENSITIVE_KEYS = {
@@ -58,7 +57,7 @@ def verify_pin(plain: str, hashed: str) -> bool:
 
 
 def _fernet() -> Fernet:
-    key = settings.totp_encryption_key
+    key = get_settings().totp_encryption_key
     derived = base64.urlsafe_b64encode(hashlib.sha256(key.encode()).digest())
     return Fernet(derived)
 
@@ -72,6 +71,7 @@ def decrypt_totp_secret(encrypted: str) -> str:
 
 
 def _issue(subject: str, token_type: str, expires: timedelta, **claims) -> str:
+    settings = get_settings()
     now = datetime.now(timezone.utc)
     payload = {"sub": subject, "type": token_type, "iat": now, "exp": now + expires, **claims}
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
@@ -87,7 +87,7 @@ def create_access_token(user: User, scope: str | None = None) -> str:
     return _issue(
         user.id,
         "access",
-        timedelta(minutes=settings.access_token_minutes),
+        timedelta(minutes=get_settings().access_token_minutes),
         **claims,
     )
 
@@ -117,12 +117,13 @@ def create_refresh_token(user: User) -> str:
     return _issue(
         user.id,
         "refresh",
-        timedelta(days=settings.refresh_token_days),
+        timedelta(days=get_settings().refresh_token_days),
         jti=str(uuid.uuid4()),
     )
 
 
 def decode_token(token: str, expected_type: str | tuple[str, ...]) -> dict:
+    settings = get_settings()
     expected = (expected_type,) if isinstance(expected_type, str) else expected_type
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
@@ -316,7 +317,7 @@ def issue_refresh_token(db: Session, user: User) -> str:
         RefreshToken(
             user_id=user.id,
             token_hash=_fingerprint(token),
-            expires_at=datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_days),
+            expires_at=datetime.now(timezone.utc) + timedelta(days=get_settings().refresh_token_days),
         )
     )
     return token

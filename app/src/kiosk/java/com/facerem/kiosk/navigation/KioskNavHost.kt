@@ -14,7 +14,7 @@ import androidx.navigation.compose.rememberNavController
 import com.facerem.core.security.DeviceCredentialStore
 import com.facerem.core.security.DeviceCredentials
 import com.facerem.kiosk.enrollment.KioskEnrollmentRoute
-import com.facerem.kiosk.scan.KioskScanPlaceholderScreen
+import com.facerem.kiosk.scan.KioskScanScreen
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.StateFlow
@@ -64,7 +64,7 @@ fun KioskNavHost(
         }
 
         composable(KioskRoute.Scan) {
-            KioskScanPlaceholderScreen(
+            KioskScanScreen(
                 credentials = credentials,
             )
         }

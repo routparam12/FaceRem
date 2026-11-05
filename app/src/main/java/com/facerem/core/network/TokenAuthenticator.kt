@@ -44,11 +44,22 @@ class TokenAuthenticator @Inject constructor(
 
         return runBlocking {
             mutex.withLock {
-                // If a kiosk device credential failed with 401, wipe and return to enrollment
+                // If a kiosk device credential failed with 401, wipe ONLY if revoked or expired
                 val deviceCreds = deviceCredentialStore.getCredentials()
                 if (deviceCreds != null && deviceCreds.accessToken == failedToken) {
-                    Log.w(TAG, "Device token rejected by server (revoked or expired). Wiping credentials.")
-                    deviceCredentialStore.notifyRevoked("This device was removed. Ask an admin for a new code.")
+                    val isRevokedOrExpired = try {
+                        val body = response.peekBody(65536).string()
+                        body.contains("DEVICE_NOT_AUTHORIZED") || body.contains("TOKEN_EXPIRED")
+                    } catch (e: Exception) {
+                        false
+                    }
+
+                    if (isRevokedOrExpired) {
+                        Log.w(TAG, "Device token rejected by server (revoked or expired). Wiping credentials.")
+                        deviceCredentialStore.notifyRevoked("This device was removed. Ask an admin for a new code.")
+                    } else {
+                        Log.w(TAG, "Device token 401 received without revocation code; preserving credentials.")
+                    }
                     return@withLock null
                 }
 

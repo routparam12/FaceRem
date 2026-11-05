@@ -13,29 +13,35 @@ import com.facerem.core.network.dto.AttendanceRecordDto
 import com.facerem.core.network.dto.DashboardDto
 import com.facerem.core.network.dto.EmployeeDto
 import com.facerem.core.network.dto.MeDto
+import com.facerem.core.network.dto.PinVerifyResponseDto
 import com.facerem.core.network.dto.RecognizeResponseDto
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
 
-/**
- * DTO to domain. Kept in one place so the HTTP shape never leaks past the repository
- * boundary — the UI models stay independent of whatever the API happens to return.
- */
-
-private val isoParser = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
+private val isoDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
     timeZone = TimeZone.getTimeZone("UTC")
-    isLenient = true
 }
-private val timeLabel = SimpleDateFormat("hh:mm a", Locale.US)
-private val longDate = SimpleDateFormat("EEEE, d MMMM yyyy", Locale.US)
-private val isoDate = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+private val longDate = SimpleDateFormat("EEEE, d MMMM", Locale.getDefault())
+private val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
 
-/** The server sends UTC ISO timestamps; people read local clock time. */
+/** Parses an ISO-8601 string into a local "9:05 AM" label. */
 fun String?.toTimeLabel(): String? {
-    if (this.isNullOrBlank()) return null
-    val trimmed = substringBefore('.').removeSuffix("Z")
-    return runCatching { isoParser.parse(trimmed)?.let(timeLabel::format) }.getOrNull()
+    if (this == null) return null
+    return runCatching {
+        // Fast paths: ISO with 'T' or a bare "HH:mm".
+        if (contains("T")) {
+            val iso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+            iso.parse(substringBefore("."))?.let(timeFormat::format)
+        } else if (contains(":")) {
+            val bare = SimpleDateFormat("HH:mm", Locale.US)
+            bare.parse(this)?.let(timeFormat::format)
+        } else {
+            null
+        }
+    }.getOrNull()
 }
 
 fun MeDto.toUser() = User(
@@ -91,6 +97,25 @@ fun RecognizeResponseDto.toOutcome() = RecognitionOutcome.Recognized(
     lateMinutes = lateMinutes,
     checkInLabel = checkInAt.toTimeLabel(),
     checkOutLabel = checkOutAt.toTimeLabel(),
+    undoToken = undoToken,
+    eventId = eventId,
+)
+
+fun PinVerifyResponseDto.toOutcome() = RecognitionOutcome.Recognized(
+    employeeId = employeeId,
+    employeeName = fullName,
+    employeeCode = employeeCode,
+    department = department,
+    eventType = AttendanceEventType.entries.firstOrNull { it.name == event }
+        ?: AttendanceEventType.CHECK_IN,
+    timeLabel = recordedAt.toTimeLabel() ?: "",
+    confidence = 1.0f,
+    status = status.toAttendanceStatus(),
+    lateMinutes = lateMinutes,
+    checkInLabel = checkInAt.toTimeLabel(),
+    checkOutLabel = checkOutAt.toTimeLabel(),
+    undoToken = undoToken,
+    eventId = eventId,
 )
 
 fun DashboardDto.toSummary(recent: List<AttendanceRecord>) = DashboardSummary(
@@ -102,8 +127,6 @@ fun DashboardDto.toSummary(recent: List<AttendanceRecord>) = DashboardSummary(
     absentCount = notCheckedIn,
     onLeaveCount = 0,
     pendingEnrollments = pendingEnrollments,
-    // The dashboard endpoint returns today only. The six-day chart stays empty until the
-    // server exposes a history series; the UI renders nothing rather than inventing data.
     weeklyAttendanceRate = emptyList(),
     recentActivity = recent,
 )

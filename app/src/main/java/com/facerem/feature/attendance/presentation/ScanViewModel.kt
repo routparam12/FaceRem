@@ -2,6 +2,8 @@ package com.facerem.feature.attendance.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.facerem.core.camera.FaceCaptureObservation
+import com.facerem.core.camera.FaceCaptureSource
 import com.facerem.core.camera.FaceQualityStatus
 import com.facerem.core.common.AppResult
 import com.facerem.core.model.RecognitionOutcome
@@ -40,17 +42,19 @@ data class ScanUiState(
     /** After a result, the frame must empty before the next person can be scanned. */
     val awaitingFaceClear: Boolean = false,
     val scanCount: Int = 0,
+    val activeUndoToken: String? = null,
+    val undoSecondsRemaining: Int = 0,
+    val undoMessage: String? = null,
+    val showPinDialog: Boolean = false,
+    val pinEmployeeCode: String = "",
+    val pinCode: String = "",
+    val pinError: String? = null,
+    val pinIsSubmitting: Boolean = false,
 ) {
-    /**
-     * The preview is never torn down. Rebinding CameraX costs about a second, which at a gate
-     * means the next person is already walking past before the camera is ready.
-     */
     val isCameraActive: Boolean get() = true
-
     val isBusy: Boolean get() = phase == ScanPhase.VERIFYING
-
-    /** In kiosk mode the loop drives itself, so there is nothing for a person to press. */
     val showsManualControls: Boolean get() = !kioskMode
+    val canUndo: Boolean get() = activeUndoToken != null && undoSecondsRemaining > 0
 
     val guidance: String
         get() = when {
@@ -79,6 +83,7 @@ class ScanViewModel @Inject constructor(
     val uiState = mutableUiState.asStateFlow()
 
     private var resultJob: Job? = null
+    private var undoJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -88,14 +93,71 @@ class ScanViewModel @Inject constructor(
 
     fun setKioskMode(enabled: Boolean) {
         mutableUiState.update { it.copy(kioskMode = enabled) }
-        // Leaving kiosk mode mid-result should not strand the operator on a frozen card.
         if (!enabled && mutableUiState.value.phase == ScanPhase.RESULT) return
         if (enabled) armNextScan()
     }
 
     /**
-     * @param captureFrame grabs a still from the live preview. Supplied by the screen so the
-     *   ViewModel stays free of CameraX, and so guest mode can run without a camera at all.
+     * Optional connection to a decoupled [FaceCaptureSource].
+     */
+    fun observeCaptureSource(source: FaceCaptureSource) {
+        viewModelScope.launch {
+            source.observations.collect { obs ->
+                if (mutableUiState.value.phase == ScanPhase.SCANNING && !mutableUiState.value.awaitingFaceClear) {
+                    processObservation(obs)
+                }
+            }
+        }
+    }
+
+    fun processObservation(observation: FaceCaptureObservation) {
+        viewModelScope.launch {
+            mutableUiState.update { it.copy(phase = ScanPhase.VERIFYING, challengePrompt = "Verifying…") }
+
+            val challengeResult = attendanceRepository.requestChallenge()
+            val (challengeId, nonce, actions) = when (challengeResult) {
+                is AppResult.Success -> Triple(
+                    challengeResult.data.challengeId,
+                    challengeResult.data.nonce,
+                    challengeResult.data.actions,
+                )
+                else -> Triple(null, null, emptyList())
+            }
+
+            val prompt = actions.firstOrNull()?.let { action ->
+                when (action) {
+                    "BLINK" -> "Please blink"
+                    "TURN_LEFT" -> "Turn slightly left"
+                    "TURN_RIGHT" -> "Turn slightly right"
+                    else -> "Verifying…"
+                }
+            } ?: "Verifying…"
+            mutableUiState.update { it.copy(challengePrompt = prompt) }
+
+            when (
+                val result = attendanceRepository.recognize(
+                    image = observation.primaryImageJpeg,
+                    challengeId = challengeId,
+                    nonce = nonce,
+                    burstFrames = observation.burstFramesJpeg,
+                    deviceLabel = DEVICE_LABEL,
+                )
+            ) {
+                is AppResult.Success -> {
+                    val outcome = result.data
+                    showResult(outcome = outcome)
+                    if (outcome is RecognitionOutcome.Recognized && outcome.undoToken != null && outcome.eventType.isNewEvent) {
+                        startUndoCountdown(outcome.undoToken)
+                    }
+                }
+                is AppResult.Error -> showResult(errorMessage = result.error.userMessage)
+                AppResult.Loading -> Unit
+            }
+        }
+    }
+
+    /**
+     * Feeds camera analyzer verdicts into the scanner.
      */
     fun onQuality(status: FaceQualityStatus, captureFrame: suspend () -> ByteArray?) {
         val transition = mutableUiState.value.onQualityFrame(status)
@@ -151,7 +213,13 @@ class ScanViewModel @Inject constructor(
                     deviceLabel = DEVICE_LABEL,
                 )
             ) {
-                is AppResult.Success -> showResult(outcome = result.data)
+                is AppResult.Success -> {
+                    val outcome = result.data
+                    showResult(outcome = outcome)
+                    if (outcome is RecognitionOutcome.Recognized && outcome.undoToken != null && outcome.eventType.isNewEvent) {
+                        startUndoCountdown(outcome.undoToken)
+                    }
+                }
                 is AppResult.Error -> showResult(errorMessage = result.error.userMessage)
                 AppResult.Loading -> Unit
             }
@@ -184,6 +252,115 @@ class ScanViewModel @Inject constructor(
     private fun armNextScan() {
         resultJob?.cancel()
         mutableUiState.update { it.armedForNextScan().copy(challengePrompt = null) }
+    }
+
+    // -------------------------------------------------------------------------
+    // Undo 30-second Countdown & Action
+    // -------------------------------------------------------------------------
+
+    fun startUndoCountdown(token: String) {
+        undoJob?.cancel()
+        mutableUiState.update {
+            it.copy(
+                activeUndoToken = token,
+                undoSecondsRemaining = 30,
+                undoMessage = null,
+            )
+        }
+        undoJob = viewModelScope.launch {
+            for (second in 29 downTo 0) {
+                delay(1000L)
+                mutableUiState.update { it.copy(undoSecondsRemaining = second) }
+            }
+            mutableUiState.update { it.copy(activeUndoToken = null, undoSecondsRemaining = 0) }
+        }
+    }
+
+    fun undo() {
+        val token = mutableUiState.value.activeUndoToken ?: return
+        viewModelScope.launch {
+            undoJob?.cancel()
+            mutableUiState.update { it.copy(activeUndoToken = null, undoSecondsRemaining = 0) }
+            when (val res = attendanceRepository.undo(token)) {
+                is AppResult.Success -> {
+                    mutableUiState.update { it.copy(undoMessage = "Attendance event successfully undone.") }
+                }
+                is AppResult.Error -> {
+                    mutableUiState.update { it.copy(errorMessage = res.error.userMessage) }
+                }
+                AppResult.Loading -> Unit
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // PIN Fallback Flow
+    // -------------------------------------------------------------------------
+
+    fun openPinDialog() {
+        mutableUiState.update {
+            it.copy(
+                showPinDialog = true,
+                pinEmployeeCode = "",
+                pinCode = "",
+                pinError = null,
+                pinIsSubmitting = false,
+            )
+        }
+    }
+
+    fun dismissPinDialog() {
+        mutableUiState.update {
+            it.copy(
+                showPinDialog = false,
+                pinEmployeeCode = "",
+                pinCode = "",
+                pinError = null,
+                pinIsSubmitting = false,
+            )
+        }
+    }
+
+    fun onPinEmployeeCodeChange(code: String) {
+        mutableUiState.update { it.copy(pinEmployeeCode = code.uppercase().trim(), pinError = null) }
+    }
+
+    fun onPinCodeChange(pin: String) {
+        if (pin.length <= 8 && pin.all { it.isDigit() }) {
+            mutableUiState.update { it.copy(pinCode = pin, pinError = null) }
+        }
+    }
+
+    fun submitPin() {
+        val code = mutableUiState.value.pinEmployeeCode
+        val pin = mutableUiState.value.pinCode
+        if (code.isBlank() || pin.isBlank()) {
+            mutableUiState.update { it.copy(pinError = "Enter both employee code and PIN.") }
+            return
+        }
+
+        viewModelScope.launch {
+            mutableUiState.update { it.copy(pinIsSubmitting = true, pinError = null) }
+            when (val res = attendanceRepository.verifyPin(code, pin)) {
+                is AppResult.Success -> {
+                    mutableUiState.update { it.copy(showPinDialog = false, pinIsSubmitting = false) }
+                    val outcome = res.data
+                    showResult(outcome = outcome)
+                    if (outcome is RecognitionOutcome.Recognized && outcome.undoToken != null && outcome.eventType.isNewEvent) {
+                        startUndoCountdown(outcome.undoToken)
+                    }
+                }
+                is AppResult.Error -> {
+                    mutableUiState.update {
+                        it.copy(
+                            pinIsSubmitting = false,
+                            pinError = res.error.userMessage,
+                        )
+                    }
+                }
+                AppResult.Loading -> Unit
+            }
+        }
     }
 
     private companion object {

@@ -4,7 +4,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
@@ -16,7 +15,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -37,6 +38,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
@@ -45,9 +47,11 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -61,10 +65,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-
-import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.compose.ui.window.Dialog
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.facerem.core.camera.FaceCameraPreview
 import com.facerem.core.camera.FaceQualityEvaluator
@@ -128,7 +135,7 @@ fun ScanRoute(
             captureController = captureController,
         )
 
-        // Framer Motion spring-animated camera reticle overlay
+        // Spring-animated camera reticle overlay
         FaceFramingOverlay(
             accent = when {
                 uiState.phase != ScanPhase.SCANNING -> AppTheme.colors.info
@@ -147,12 +154,33 @@ fun ScanRoute(
             modifier = Modifier.align(Alignment.TopCenter),
         )
 
-        // Glassmorphism HUD Footer
-        ScanFooter(
-            uiState = uiState,
-            onScanAgain = viewModel::scanAgain,
+        // Glassmorphism HUD Footer (shown ONLY in SCANNING phase when no active undo banner)
+        AnimatedVisibility(
+            visible = uiState.phase == ScanPhase.SCANNING && !uiState.canUndo && uiState.undoMessage == null,
+            enter = fadeIn(tween(150)),
+            exit = fadeOut(tween(150)),
             modifier = Modifier.align(Alignment.BottomCenter),
-        )
+        ) {
+            ScanFooter(
+                uiState = uiState,
+                onScanAgain = viewModel::scanAgain,
+                onOpenPin = viewModel::openPinDialog,
+            )
+        }
+
+        // 30-second Undo Banner
+        AnimatedVisibility(
+            visible = uiState.canUndo || uiState.undoMessage != null,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            UndoBanner(
+                secondsRemaining = uiState.undoSecondsRemaining,
+                undoMessage = uiState.undoMessage,
+                onUndo = viewModel::undo,
+            )
+        }
 
         // Bouncy spring result card overlay
         AnimatedVisibility(
@@ -177,17 +205,32 @@ fun ScanRoute(
             ResultOverlay(
                 outcome = uiState.outcome,
                 errorMessage = uiState.errorMessage,
+                onOpenPin = viewModel::openPinDialog,
                 modifier = Modifier.fillMaxSize(),
             )
         }
 
-        // Animated radar wave verifying overlay
+        // Animated radar wave verifying overlay with challenge action prompt
         AnimatedVisibility(
             visible = uiState.phase == ScanPhase.VERIFYING,
             enter = fadeIn(tween(200)),
             exit = fadeOut(tween(200)),
         ) {
-            VerifyingOverlay()
+            VerifyingOverlay(prompt = uiState.challengePrompt)
+        }
+
+        // PIN Fallback Dialog
+        if (uiState.showPinDialog) {
+            PinFallbackDialog(
+                employeeCode = uiState.pinEmployeeCode,
+                pin = uiState.pinCode,
+                error = uiState.pinError,
+                isSubmitting = uiState.pinIsSubmitting,
+                onEmployeeCodeChange = viewModel::onPinEmployeeCodeChange,
+                onPinChange = viewModel::onPinCodeChange,
+                onSubmit = viewModel::submitPin,
+                onDismiss = viewModel::dismissPinDialog,
+            )
         }
     }
 }
@@ -272,6 +315,7 @@ private fun KioskHeader(
 private fun ScanFooter(
     uiState: ScanUiState,
     onScanAgain: () -> Unit,
+    onOpenPin: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -311,6 +355,16 @@ private fun ScanFooter(
             textAlign = TextAlign.Center,
         )
 
+        Spacer(Modifier.height(Spacing.sm))
+        TextButton(onClick = onOpenPin) {
+            Text(
+                "Use Employee Code & PIN instead",
+                color = Color.White.copy(alpha = 0.9f),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+
         if (uiState.showsManualControls) {
             Spacer(Modifier.height(Spacing.lg))
             PrimaryButton(
@@ -324,7 +378,65 @@ private fun ScanFooter(
 }
 
 @Composable
-private fun VerifyingOverlay() {
+private fun UndoBanner(
+    secondsRemaining: Int,
+    undoMessage: String?,
+    onUndo: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(Spacing.lg),
+        shape = RoundedCornerShape(16.dp),
+        color = Color(0xFF1E293B),
+        tonalElevation = 6.dp,
+        border = BorderStroke(1.dp, Color(0xFF334155)),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.lg, vertical = Spacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            if (undoMessage != null) {
+                Text(
+                    text = undoMessage,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White,
+                    fontWeight = FontWeight.Medium,
+                )
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = Color(0xFF10B981),
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.width(Spacing.sm))
+                    Text(
+                        text = "Attendance recorded · Undo (${secondsRemaining}s)",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+                TextButton(onClick = onUndo) {
+                    Text(
+                        "UNDO",
+                        color = Color(0xFFEF4444),
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VerifyingOverlay(prompt: String?) {
     val infiniteTransition = rememberInfiniteTransition(label = "verifying-radar")
     val pulseProgress by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -342,7 +454,6 @@ private fun VerifyingOverlay() {
             .background(Color.Black.copy(alpha = 0.68f)),
         contentAlignment = Alignment.Center,
     ) {
-        // Radar pulse wave
         Canvas(modifier = Modifier.size(180.dp)) {
             val center = Offset(size.width / 2f, size.height / 2f)
             val maxRadius = size.width / 2f
@@ -373,10 +484,11 @@ private fun VerifyingOverlay() {
             }
             Spacer(Modifier.height(Spacing.lg))
             Text(
-                "Matching face profile…",
+                text = prompt ?: "Matching face profile…",
                 color = Color.White,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
             )
         }
     }
@@ -386,6 +498,7 @@ private fun VerifyingOverlay() {
 private fun ResultOverlay(
     outcome: RecognitionOutcome?,
     errorMessage: String?,
+    onOpenPin: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -408,6 +521,8 @@ private fun ResultOverlay(
                     tint = MaterialTheme.colorScheme.error,
                     title = "Face not recognized",
                     message = outcome.message,
+                    actionButtonText = "Use Employee Code & PIN",
+                    onAction = onOpenPin,
                 )
 
                 outcome is RecognitionOutcome.Rejected -> MessageCard(
@@ -415,6 +530,8 @@ private fun ResultOverlay(
                     tint = MaterialTheme.colorScheme.error,
                     title = "Scan rejected",
                     message = outcome.message,
+                    actionButtonText = "Use Employee Code & PIN",
+                    onAction = onOpenPin,
                 )
 
                 else -> MessageCard(
@@ -422,6 +539,8 @@ private fun ResultOverlay(
                     tint = MaterialTheme.colorScheme.error,
                     title = "Scan failed",
                     message = errorMessage ?: "Please try again.",
+                    actionButtonText = "Use Employee Code & PIN",
+                    onAction = onOpenPin,
                 )
             }
         }
@@ -518,7 +637,6 @@ private fun RecognizedCard(outcome: RecognitionOutcome.Recognized) {
     }
 }
 
-/** "In since 09:05" reads better at a gate than a bare timestamp. */
 private fun repeatDetail(outcome: RecognitionOutcome.Recognized): String {
     val checkIn = outcome.checkInLabel
     val checkOut = outcome.checkOutLabel
@@ -535,6 +653,8 @@ private fun MessageCard(
     tint: Color,
     title: String,
     message: String,
+    actionButtonText: String? = null,
+    onAction: (() -> Unit)? = null,
 ) {
     Column(
         modifier = Modifier
@@ -548,10 +668,119 @@ private fun MessageCard(
         Spacer(Modifier.height(Spacing.sm))
         Text(
             message,
-            style = MaterialTheme.typography.bodyLarge,
+            style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
+        if (actionButtonText != null && onAction != null) {
+            Spacer(Modifier.height(Spacing.lg))
+            PrimaryButton(
+                text = actionButtonText,
+                onClick = onAction,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun PinFallbackDialog(
+    employeeCode: String,
+    pin: String,
+    error: String?,
+    isSubmitting: Boolean,
+    onEmployeeCodeChange: (String) -> Unit,
+    onPinChange: (String) -> Unit,
+    onSubmit: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 8.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.md),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(Spacing.xl),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    "PIN Attendance Fallback",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.height(Spacing.xs))
+                Text(
+                    "Enter your employee code and PIN to record attendance.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(Spacing.lg))
+
+                OutlinedTextField(
+                    value = employeeCode,
+                    onValueChange = onEmployeeCodeChange,
+                    label = { Text("Employee Code") },
+                    placeholder = { Text("e.g. EMP-101") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Characters,
+                        keyboardType = KeyboardType.Ascii,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                Spacer(Modifier.height(Spacing.md))
+
+                OutlinedTextField(
+                    value = pin,
+                    onValueChange = onPinChange,
+                    label = { Text("PIN") },
+                    placeholder = { Text("••••") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                if (error != null) {
+                    Spacer(Modifier.height(Spacing.md))
+                    Text(
+                        text = error,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+
+                Spacer(Modifier.height(Spacing.xl))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(
+                        onClick = onDismiss,
+                        enabled = !isSubmitting,
+                    ) {
+                        Text("Cancel")
+                    }
+                    Spacer(Modifier.width(Spacing.sm))
+                    PrimaryButton(
+                        text = if (isSubmitting) "Verifying…" else "Submit",
+                        onClick = onSubmit,
+                        enabled = !isSubmitting && employeeCode.isNotBlank() && pin.isNotBlank(),
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -563,36 +792,33 @@ private fun ScanPermissionPrompt(
 ) {
     Column(
         modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(
-            modifier = Modifier
-                .size(72.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.Default.CameraAlt,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
-        }
+        Icon(
+            imageVector = Icons.Default.CameraAlt,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(56.dp),
+        )
         Spacer(Modifier.height(Spacing.lg))
-        Text("Camera access needed", style = MaterialTheme.typography.titleMedium)
+        Text(
+            text = "Camera access required",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+        )
         Spacer(Modifier.height(Spacing.sm))
         Text(
-            if (hasBeenRequested) {
-                "Camera permission was declined. Enable it in system settings to scan attendance."
-            } else {
-                "The scanner needs the front camera to detect a face before verification."
-            },
+            text = "FaceAttend uses the front camera to detect faces and mark attendance.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(Spacing.lg))
-        PrimaryButton("Allow camera", onRequest, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(Spacing.xl))
+        PrimaryButton(
+            text = if (hasBeenRequested) "Open settings" else "Grant permission",
+            onClick = onRequest,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }

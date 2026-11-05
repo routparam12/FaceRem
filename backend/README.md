@@ -320,6 +320,9 @@ The project uses `pytest` with a `@pytest.mark.slow` marker distinguishing fast 
 > **Windows Sandbox Note:**
 > On Windows, Starlette / FastAPI's `TestClient` uses an internal `asyncio` event loop whose `socketpair()` creates a loopback TCP connection on `127.0.0.1`. Under strict sandbox isolation with loopback networking blocked, `TestClient.__enter__()` hangs waiting for the socket pair handshake. When running tests in automation or agents on Windows, always execute tests outside network isolation (`BypassSandbox: true`).
 
+> **Test Database Isolation Note:**
+> Tests automatically execute against an isolated session-scoped temporary SQLite database managed by `backend/tests/conftest.py`. The local development `./faceattend.db` database in the repository working directory is never touched, seeded, or polluted by test runs. Leftover database files will not alter test results.
+
 ## Layout
 
 Routes are grouped by what they act on, so nothing is a thousand-line file:

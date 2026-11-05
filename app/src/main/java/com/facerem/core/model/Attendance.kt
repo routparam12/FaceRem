@@ -55,6 +55,8 @@ sealed interface RecognitionOutcome {
         /** The day's timestamps, so a repeat scan can say "in since 09:05". */
         val checkInLabel: String? = null,
         val checkOutLabel: String? = null,
+        val undoToken: String? = null,
+        val eventId: String? = null,
     ) : RecognitionOutcome
 
     /** Never expose near matches for an unrecognised face. */

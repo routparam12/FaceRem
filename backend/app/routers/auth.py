@@ -55,8 +55,6 @@ from ..security import (
     verify_password,
 )
 
-settings = get_settings()
-
 #: How long a self-serve trial lasts before it needs a plan.
 TRIAL_DAYS = 14
 
@@ -65,6 +63,7 @@ router = APIRouter()
 
 @router.post("/auth/login", response_model=TokenPair)
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)) -> TokenPair:
+    settings = get_settings()
     client_ip = request.client.host if request.client else "unknown"
     rate_key = f"login:{client_ip}:{payload.email.strip().lower()}"
     check_rate_limit(rate_key, max_attempts=5, window_seconds=60)

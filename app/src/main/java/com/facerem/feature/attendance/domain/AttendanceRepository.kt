@@ -21,5 +21,15 @@ interface AttendanceRepository {
         deviceLabel: String = "android-kiosk",
     ): AppResult<RecognitionOutcome>
 
+    /**
+     * Maps to `POST /api/v1/attendance/undo`. Voids the last recorded attendance event inside the 30-second window.
+     */
+    suspend fun undo(undoToken: String): AppResult<String>
+
+    /**
+     * Maps to `POST /api/v1/attendance/pin-verify`. PIN fallback recording attendance for the employee.
+     */
+    suspend fun verifyPin(employeeCode: String, pin: String): AppResult<RecognitionOutcome>
+
     suspend fun history(): AppResult<List<AttendanceRecord>>
 }

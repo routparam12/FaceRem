@@ -1,6 +1,9 @@
 package com.facerem.feature.attendance
 
+import com.facerem.core.camera.FaceCaptureObservation
+import com.facerem.core.camera.FaceCaptureQuality
 import com.facerem.core.camera.FaceQualityStatus
+import com.facerem.core.camera.FakeFaceCaptureSource
 import com.facerem.core.common.AppError
 import com.facerem.core.common.AppResult
 import com.facerem.core.model.AttendanceEventType
@@ -24,6 +27,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -187,13 +191,142 @@ class ScanViewModelTest {
         feedHeldFace(viewModel, captureMock)
         advanceUntilIdle()
 
-        // Verify that the repository received ONLY the biometric raw frame data and challenge nonces
-        // No client-side liveness score, boolean, or verdict is transmitted.
         assertNotNull(fakeRepository.lastCapturedImage)
         assertEquals("chal-test-uuid", fakeRepository.lastChallengeId)
         assertEquals("nonce-test-hex", fakeRepository.lastNonce)
         assertEquals(2, fakeRepository.lastBurstFrames.size)
         assertEquals("android-kiosk", fakeRepository.lastDeviceLabel)
+    }
+
+    @Test
+    fun `undo countdown starts on new attendance event and executes undo successfully`() = runTest(testDispatcher) {
+        val viewModel = createViewModel(kioskMode = false)
+        val dummyFrame = byteArrayOf(0x01, 0x02, 0x03)
+        val captureMock: suspend () -> ByteArray? = { dummyFrame }
+
+        fakeRepository.recognizeResultToReturn = AppResult.Success(
+            RecognitionOutcome.Recognized(
+                employeeId = "emp-1",
+                employeeName = "Bob Smith",
+                employeeCode = "EMP002",
+                department = "Operations",
+                eventType = AttendanceEventType.CHECK_IN,
+                timeLabel = "09:00 AM",
+                confidence = 0.92f,
+                status = AttendanceStatus.PRESENT,
+                lateMinutes = 0,
+                undoToken = "undo-token-12345",
+            )
+        )
+
+        feedHeldFace(viewModel, captureMock)
+        advanceUntilIdle()
+
+        // Verify undo timer is active
+        assertTrue(viewModel.uiState.value.canUndo)
+        assertEquals(30, viewModel.uiState.value.undoSecondsRemaining)
+        assertEquals("undo-token-12345", viewModel.uiState.value.activeUndoToken)
+
+        // Advance 5 seconds
+        advanceTimeBy(5000L)
+        assertEquals(25, viewModel.uiState.value.undoSecondsRemaining)
+
+        // Execute Undo
+        viewModel.undo()
+        advanceUntilIdle()
+
+        assertEquals("undo-token-12345", fakeRepository.lastUndoToken)
+        assertEquals(1, fakeRepository.undoCallCount)
+        assertNull(viewModel.uiState.value.activeUndoToken)
+        assertEquals("Attendance event successfully undone.", viewModel.uiState.value.undoMessage)
+    }
+
+    @Test
+    fun `pin fallback dialog flow validates credentials and records attendance`() = runTest(testDispatcher) {
+        val viewModel = createViewModel(kioskMode = false)
+
+        viewModel.openPinDialog()
+        assertTrue(viewModel.uiState.value.showPinDialog)
+
+        viewModel.onPinEmployeeCodeChange("emp-999")
+        assertEquals("EMP-999", viewModel.uiState.value.pinEmployeeCode)
+
+        viewModel.onPinCodeChange("1234")
+        assertEquals("1234", viewModel.uiState.value.pinCode)
+
+        fakeRepository.verifyPinResultToReturn = AppResult.Success(
+            RecognitionOutcome.Recognized(
+                employeeId = "emp-999",
+                employeeName = "Charlie Day",
+                employeeCode = "EMP-999",
+                department = "HR",
+                eventType = AttendanceEventType.CHECK_IN,
+                timeLabel = "09:15 AM",
+                confidence = 1.0f,
+                status = AttendanceStatus.PRESENT,
+                lateMinutes = 15,
+                undoToken = "pin-undo-token-999",
+            )
+        )
+
+        viewModel.submitPin()
+        advanceUntilIdle()
+
+        assertEquals("EMP-999", fakeRepository.lastPinEmployeeCode)
+        assertEquals("1234", fakeRepository.lastPin)
+        assertFalse(viewModel.uiState.value.showPinDialog)
+        assertEquals(ScanPhase.RESULT, viewModel.uiState.value.phase)
+        val recognized = viewModel.uiState.value.outcome as? RecognitionOutcome.Recognized
+        assertNotNull(recognized)
+        assertEquals("Charlie Day", recognized?.employeeName)
+        assertTrue(viewModel.uiState.value.canUndo)
+    }
+
+    @Test
+    fun `pin fallback handles PIN_LOCKED and generic invalid credentials`() = runTest(testDispatcher) {
+        val viewModel = createViewModel(kioskMode = false)
+        viewModel.openPinDialog()
+        viewModel.onPinEmployeeCodeChange("EMP-LOCKED")
+        viewModel.onPinCodeChange("9999")
+
+        fakeRepository.verifyPinResultToReturn = AppResult.Error(
+            AppError.Api(
+                code = "PIN_LOCKED",
+                userMessage = "PIN entry is locked due to too many failed attempts. Try again later.",
+            )
+        )
+
+        viewModel.submitPin()
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.showPinDialog)
+        assertEquals(
+            "PIN entry is locked due to too many failed attempts. Try again later.",
+            viewModel.uiState.value.pinError,
+        )
+    }
+
+    @Test
+    fun `decoupled FaceCaptureSource emits observations and processes attendance`() = runTest(testDispatcher) {
+        val viewModel = createViewModel(kioskMode = false)
+        val fakeSource = FakeFaceCaptureSource()
+        viewModel.observeCaptureSource(fakeSource)
+
+        val obs = FaceCaptureObservation(
+            observationId = "obs-1",
+            timestampMs = System.currentTimeMillis(),
+            primaryImageJpeg = byteArrayOf(0x0A, 0x0B, 0x0C),
+            quality = FaceCaptureQuality(isCentered = true, hasSingleFace = true),
+            trackId = 101,
+            burstFramesJpeg = listOf(byteArrayOf(0x01), byteArrayOf(0x02)),
+        )
+
+        fakeSource.emitObservation(obs)
+        advanceUntilIdle()
+
+        assertEquals(1, fakeRepository.recognizeCallCount)
+        assertEquals(2, fakeRepository.lastBurstFrames.size)
+        assertEquals(ScanPhase.RESULT, viewModel.uiState.value.phase)
     }
 }
 
@@ -220,13 +353,33 @@ class FakeAttendanceRepository : AttendanceRepository {
         )
     )
 
+    var verifyPinResultToReturn: AppResult<RecognitionOutcome> = AppResult.Success(
+        RecognitionOutcome.Recognized(
+            employeeId = "emp-uuid-1",
+            employeeName = "Alice Walker",
+            employeeCode = "EMP001",
+            department = "Engineering",
+            eventType = AttendanceEventType.CHECK_IN,
+            timeLabel = "10:00 AM",
+            confidence = 1.0f,
+            status = AttendanceStatus.PRESENT,
+            lateMinutes = 0,
+        )
+    )
+
     var requestChallengeCallCount = 0
     var recognizeCallCount = 0
+    var undoCallCount = 0
+    var verifyPinCallCount = 0
+
     var lastCapturedImage: ByteArray? = null
     var lastChallengeId: String? = null
     var lastNonce: String? = null
     var lastBurstFrames: List<ByteArray> = emptyList()
     var lastDeviceLabel: String? = null
+    var lastUndoToken: String? = null
+    var lastPinEmployeeCode: String? = null
+    var lastPin: String? = null
 
     override suspend fun requestChallenge(): AppResult<LivenessChallenge> {
         requestChallengeCallCount++
@@ -247,6 +400,19 @@ class FakeAttendanceRepository : AttendanceRepository {
         lastBurstFrames = burstFrames
         lastDeviceLabel = deviceLabel
         return recognizeResultToReturn
+    }
+
+    override suspend fun undo(undoToken: String): AppResult<String> {
+        undoCallCount++
+        lastUndoToken = undoToken
+        return AppResult.Success("event-undone")
+    }
+
+    override suspend fun verifyPin(employeeCode: String, pin: String): AppResult<RecognitionOutcome> {
+        verifyPinCallCount++
+        lastPinEmployeeCode = employeeCode
+        lastPin = pin
+        return verifyPinResultToReturn
     }
 
     override suspend fun history(): AppResult<List<AttendanceRecord>> {

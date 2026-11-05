@@ -29,7 +29,7 @@ from app.config import get_settings
 from app.db import SessionLocal
 from app.face import StubEngine, find_best_match, get_engine
 from app.main import _assert_production_requirements, app
-from app.models import AttendanceRecord, AuditLog, Employee, FaceProfile, Organization, Role
+from app.models import AttendanceEvent, AttendanceRecord, AuditLog, Employee, FaceProfile, Organization, Role
 from app.seed import DEMO_PASSWORD
 
 
@@ -529,11 +529,11 @@ def test_hard_delete_removes_embeddings_and_preserves_attendance(client):
         ).all()
         assert len(remaining) == 0
 
-        # Attendance record is intact
-        att = db.scalars(
-            select(AttendanceRecord).where(AttendanceRecord.employee_id == emp_id)
+        # Attendance event is intact (preserved after face deletion)
+        att_events = db.scalars(
+            select(AttendanceEvent).where(AttendanceEvent.employee_id == emp_id)
         ).all()
-        assert len(att) > 0
+        assert len(att_events) > 0
 
         # Audit log has 'face.deleted' with NO biometric data
         del_log = db.scalars(

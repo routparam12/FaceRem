@@ -62,7 +62,6 @@ from ..security import (
     verify_password,
 )
 
-settings = get_settings()
 router = APIRouter()
 
 
@@ -134,6 +133,7 @@ async def recognize(
         db.flush()
 
     # 2. Extract burst frames and verify liveness
+    settings = get_settings()
     liveness_evidence = None
     if settings.liveness_mode == "disabled":
         liveness_evidence = {"passed": True, "score": 1.0, "provider": "disabled"}
@@ -424,6 +424,7 @@ def pin_verify(
 
 
 def _decide_event(record: AttendanceRecord | None, now: datetime) -> str:
+    settings = get_settings()
     if record is None:
         return "CHECK_IN"
     if record.check_out_at is not None:
@@ -462,6 +463,7 @@ def _recognize_response(
 
 
 def _late_minutes(moment: datetime, shift: Shift | None) -> int:
+    settings = get_settings()
     if shift is not None:
         hour, minute = (int(part) for part in shift.start_time.split(":"))
         grace_minutes = shift.grace_minutes

@@ -91,4 +91,9 @@ internal class DispatchingAttendanceRepository(
         active().recognize(image, challengeId, nonce, burstFrames, deviceLabel)
 
     override suspend fun history(): AppResult<List<AttendanceRecord>> = active().history()
+
+    override suspend fun undo(undoToken: String): AppResult<String> = active().undo(undoToken)
+
+    override suspend fun verifyPin(employeeCode: String, pin: String): AppResult<RecognitionOutcome> =
+        active().verifyPin(employeeCode, pin)
 }

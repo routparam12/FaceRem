@@ -14,8 +14,6 @@ from .db import SessionLocal, engine
 from .security import AppError
 from .seed import seed_demo_data
 
-settings = get_settings()
-
 
 def _assert_schema_exists() -> None:
     """
@@ -32,6 +30,7 @@ def _assert_schema_exists() -> None:
 
 def _assert_production_requirements() -> None:
     """Refuse to start in production without essential security infrastructure."""
+    settings = get_settings()
     if not settings.is_production:
         return
     if not settings.redis_url:
@@ -74,6 +73,7 @@ def _assert_production_requirements() -> None:
 async def lifespan(app: FastAPI):
     _assert_schema_exists()
     _assert_production_requirements()
+    settings = get_settings()
     if settings.face_engine == "insightface":
         try:
             from .face import warmup_engine
@@ -95,7 +95,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if not settings.is_production else [],
+    allow_origins=["*"] if not get_settings().is_production else [],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -151,6 +151,7 @@ async def envelope_response(request: Request, call_next):
 
 @app.get("/health")
 def health() -> dict:
+    settings = get_settings()
     return {"status": "ok", "face_engine": settings.face_engine, "liveness": settings.liveness_mode}
 
 

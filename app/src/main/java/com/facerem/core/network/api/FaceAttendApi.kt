@@ -8,7 +8,11 @@ import com.facerem.core.network.dto.EmployeeDto
 import com.facerem.core.network.dto.EnrollResponseDto
 import com.facerem.core.network.dto.NamedDto
 import com.facerem.core.network.dto.NewEmployeeDto
+import com.facerem.core.network.dto.PinVerifyRequestDto
+import com.facerem.core.network.dto.PinVerifyResponseDto
 import com.facerem.core.network.dto.RecognizeResponseDto
+import com.facerem.core.network.dto.UndoRequestDto
+import com.facerem.core.network.dto.UndoResponseDto
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import retrofit2.http.Body
@@ -54,6 +58,12 @@ interface FaceAttendApi {
         @Part burst: List<MultipartBody.Part>,
         @Part("device_label") deviceLabel: RequestBody,
     ): ApiEnvelope<RecognizeResponseDto>
+
+    @POST("api/v1/attendance/undo")
+    suspend fun undo(@Body body: UndoRequestDto): ApiEnvelope<UndoResponseDto>
+
+    @POST("api/v1/attendance/pin-verify")
+    suspend fun pinVerify(@Body body: PinVerifyRequestDto): ApiEnvelope<PinVerifyResponseDto>
 
     @GET("api/v1/attendance")
     suspend fun attendance(@Query("on") on: String? = null): ApiEnvelope<List<AttendanceRecordDto>>

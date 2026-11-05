@@ -9,6 +9,8 @@ import com.facerem.core.network.ApiCall
 import com.facerem.core.network.TEXT
 import com.facerem.core.network.api.FaceAttendApi
 import com.facerem.core.network.asImagePart
+import com.facerem.core.network.dto.PinVerifyRequestDto
+import com.facerem.core.network.dto.UndoRequestDto
 import com.facerem.core.network.map
 import com.facerem.core.network.mapper.toOutcome
 import com.facerem.core.network.mapper.toRecord
@@ -71,6 +73,34 @@ class RemoteAttendanceRepository @Inject constructor(
                             message = result.error.userMessage,
                         ),
                     )
+
+                else -> result
+            }
+
+            AppResult.Loading -> AppResult.Loading
+        }
+    }
+
+    override suspend fun undo(undoToken: String): AppResult<String> =
+        apiCall.invoke {
+            api.undo(UndoRequestDto(undoToken))
+        }.map { it.eventId.ifBlank { it.message } }
+
+    override suspend fun verifyPin(employeeCode: String, pin: String): AppResult<RecognitionOutcome> {
+        val result = apiCall.invoke {
+            api.pinVerify(PinVerifyRequestDto(employeeCode = employeeCode.trim(), pin = pin.trim()))
+        }
+        return when (result) {
+            is AppResult.Success -> AppResult.Success(result.data.toOutcome())
+            is AppResult.Error -> when ((result.error as? AppError.Api)?.code) {
+                "INVALID_CREDENTIALS" ->
+                    AppResult.Success(RecognitionOutcome.NotRecognized(result.error.userMessage))
+
+                "PIN_LOCKED" ->
+                    AppResult.Success(RecognitionOutcome.Rejected("PIN_LOCKED", result.error.userMessage))
+
+                "RATE_LIMITED" ->
+                    AppResult.Success(RecognitionOutcome.Rejected("RATE_LIMITED", result.error.userMessage))
 
                 else -> result
             }

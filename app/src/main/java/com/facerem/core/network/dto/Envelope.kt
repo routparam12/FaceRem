@@ -106,6 +106,43 @@ data class RecognizeResponseDto(
     @SerialName("liveness_score") val livenessScore: Float = 0f,
     @SerialName("check_in_at") val checkInAt: String? = null,
     @SerialName("check_out_at") val checkOutAt: String? = null,
+    @SerialName("undo_token") val undoToken: String? = null,
+    @SerialName("event_id") val eventId: String? = null,
+    @SerialName("provisional") val provisional: Boolean = false,
+)
+
+@Serializable
+data class UndoRequestDto(
+    @SerialName("undo_token") val undoToken: String,
+)
+
+@Serializable
+data class UndoResponseDto(
+    val success: Boolean = true,
+    @SerialName("event_id") val eventId: String = "",
+    val message: String = "",
+)
+
+@Serializable
+data class PinVerifyRequestDto(
+    @SerialName("employee_code") val employeeCode: String,
+    val pin: String,
+)
+
+@Serializable
+data class PinVerifyResponseDto(
+    @SerialName("employee_id") val employeeId: String,
+    @SerialName("full_name") val fullName: String,
+    @SerialName("employee_code") val employeeCode: String,
+    val department: String = "",
+    val event: String,
+    @SerialName("recorded_at") val recordedAt: String,
+    val status: String,
+    @SerialName("late_minutes") val lateMinutes: Int = 0,
+    @SerialName("undo_token") val undoToken: String? = null,
+    @SerialName("event_id") val eventId: String? = null,
+    @SerialName("check_in_at") val checkInAt: String? = null,
+    @SerialName("check_out_at") val checkOutAt: String? = null,
 )
 
 @Serializable

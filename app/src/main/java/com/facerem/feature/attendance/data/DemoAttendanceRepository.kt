@@ -36,6 +36,16 @@ class DemoAttendanceRepository @Inject constructor(
         return AppResult.Success(demoDataStore.simulateRecognition())
     }
 
+    override suspend fun undo(undoToken: String): AppResult<String> {
+        delay(200)
+        return AppResult.Success("undone")
+    }
+
+    override suspend fun verifyPin(employeeCode: String, pin: String): AppResult<RecognitionOutcome> {
+        delay(500)
+        return AppResult.Success(demoDataStore.simulateRecognition())
+    }
+
     override suspend fun history(): AppResult<List<AttendanceRecord>> {
         delay(400)
         return AppResult.Success(
