@@ -6,13 +6,13 @@ import com.facerem.core.model.AttendanceRecord
 import com.facerem.core.model.LivenessChallenge
 import com.facerem.core.model.RecognitionOutcome
 import com.facerem.core.network.ApiCall
+import com.facerem.core.network.TEXT
 import com.facerem.core.network.api.FaceAttendApi
+import com.facerem.core.network.asImagePart
+import com.facerem.core.network.map
 import com.facerem.core.network.mapper.toOutcome
 import com.facerem.core.network.mapper.toRecord
 import com.facerem.feature.attendance.domain.AttendanceRepository
-import com.facerem.feature.employees.data.TEXT
-import com.facerem.feature.employees.data.asImagePart
-import com.facerem.feature.employees.data.map
 import javax.inject.Inject
 import javax.inject.Singleton
 import okhttp3.MediaType.Companion.toMediaType

@@ -1,5 +1,6 @@
 from datetime import date, datetime, timezone
-from typing import Annotated, Literal
+from enum import Enum
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -169,6 +170,22 @@ class DeviceEnrollResponse(BaseModel):
     mode: DeviceMode
     access_token: str
     token_type: str = "bearer"
+
+
+class DeviceEventType(str, Enum):
+    KIOSK_EXIT_UNLOCK = "KIOSK_EXIT_UNLOCK"
+    SUPERVISED_ENROLL_START = "SUPERVISED_ENROLL_START"
+    KIOSK_EXIT_FAILED = "KIOSK_EXIT_FAILED"
+
+
+class DeviceEventRequest(BaseModel):
+    event_type: DeviceEventType
+    details: dict[str, Any] | None = None
+
+
+class DeviceEventResponse(BaseModel):
+    status: str = "recorded"
+    event_type: DeviceEventType
 
 
 class AttendanceDeviceOut(BaseModel):

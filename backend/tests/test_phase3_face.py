@@ -19,11 +19,11 @@ from starlette.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-os.environ.setdefault("DATABASE_URL", "sqlite:///./test_faceattend.db")
-os.environ.setdefault("JWT_SECRET", "test-secret-that-is-long-enough-for-hs256-abcdef")
-os.environ.setdefault("FACE_ENGINE", "stub")
-os.environ.setdefault("LIVENESS_MODE", "disabled")
-os.environ.setdefault("SEED_DEMO_DATA", "true")
+os.environ["DATABASE_URL"] = os.environ.get("DATABASE_URL", "sqlite:///./test_faceattend.db")
+os.environ["JWT_SECRET"] = "test-secret-that-is-long-enough-for-hs256-abcdef"
+os.environ["FACE_ENGINE"] = "stub"
+os.environ["LIVENESS_MODE"] = "disabled"
+os.environ["SEED_DEMO_DATA"] = "true"
 
 from app.config import get_settings
 from app.db import SessionLocal

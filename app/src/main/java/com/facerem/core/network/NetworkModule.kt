@@ -2,6 +2,7 @@ package com.facerem.core.network
 
 import com.facerem.BuildConfig
 import com.facerem.core.network.api.AuthApi
+import com.facerem.core.network.api.DeviceApi
 import com.facerem.core.network.api.FaceAttendApi
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import dagger.Module
@@ -98,6 +99,11 @@ object NetworkModule {
     @Singleton
     fun provideFaceAttendApi(retrofit: Retrofit): FaceAttendApi =
         retrofit.create(FaceAttendApi::class.java)
+
+    @Provides
+    @Singleton
+    fun provideDeviceApi(retrofit: Retrofit): DeviceApi =
+        retrofit.create(DeviceApi::class.java)
 
     @Provides
     @Singleton

@@ -3,6 +3,7 @@ package com.facerem.core.network
 import android.util.Log
 import com.facerem.core.network.api.AuthApi
 import com.facerem.core.network.dto.RefreshRequestDto
+import com.facerem.core.security.DeviceCredentialStore
 import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
@@ -17,22 +18,17 @@ import okhttp3.Route
 private const val TAG = "TokenAuthenticator"
 
 /**
- * Refreshes the access token when the server rejects one, then replays the request.
+ * Handles 401 Unauthorized responses.
  *
- * Two things stop this from going wrong:
+ * For Kiosk devices: Device credentials have no refresh token. Any 401 (e.g. DEVICE_NOT_AUTHORIZED)
+ * wipes stored device credentials and broadcasts a revocation event to route back to Enrollment.
  *
- * - **A mutex.** Several requests usually fail at once when a token expires. Without it each
- *   would refresh separately, and because the backend rotates refresh tokens the second
- *   call would present a burnt token — which the server treats as theft and responds to by
- *   ending every session.
- * - **A retry count.** If the refreshed token is also rejected, giving up is the only safe
- *   move; retrying forever is how a refresh loop locks an app into a spin.
+ * For Admin users: Refreshes user access tokens using the refresh token flow.
  */
 @Singleton
 class TokenAuthenticator @Inject constructor(
     private val tokenStore: TokenStore,
-    // The refresh client is built without this authenticator, so asking for it lazily is
-    // what breaks the circular dependency.
+    private val deviceCredentialStore: DeviceCredentialStore,
     @param:RefreshClient private val refreshApi: Provider<AuthApi>,
 ) : Authenticator {
 
@@ -48,6 +44,14 @@ class TokenAuthenticator @Inject constructor(
 
         return runBlocking {
             mutex.withLock {
+                // If a kiosk device credential failed with 401, wipe and return to enrollment
+                val deviceCreds = deviceCredentialStore.getCredentials()
+                if (deviceCreds != null && deviceCreds.accessToken == failedToken) {
+                    Log.w(TAG, "Device token rejected by server (revoked or expired). Wiping credentials.")
+                    deviceCredentialStore.notifyRevoked("This device was removed. Ask an admin for a new code.")
+                    return@withLock null
+                }
+
                 val current = tokenStore.accessToken()
                 // Another request already refreshed while this one waited for the lock.
                 if (current != null && current != failedToken) {

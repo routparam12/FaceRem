@@ -30,6 +30,18 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    flavorDimensions += "role"
+    productFlavors {
+        create("admin") {
+            dimension = "role"
+            applicationIdSuffix = ".admin"
+        }
+        create("kiosk") {
+            dimension = "role"
+            applicationIdSuffix = ".kiosk"
+        }
+    }
+
     buildTypes {
         release {
             optimization {

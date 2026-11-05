@@ -129,3 +129,31 @@ data class ChallengeResponseDto(
     val actions: List<String> = emptyList(),
     @SerialName("expires_at") val expiresAt: String = "",
 )
+
+@Serializable
+data class DeviceEnrollRequestDto(
+    val code: String,
+    val name: String? = null,
+)
+
+@Serializable
+data class DeviceEnrollResponseDto(
+    @SerialName("device_id") val deviceId: String,
+    @SerialName("organization_id") val organizationId: String,
+    val name: String,
+    val mode: String,
+    @SerialName("access_token") val accessToken: String,
+    @SerialName("token_type") val tokenType: String = "bearer",
+)
+
+@Serializable
+data class DeviceEventRequestDto(
+    @SerialName("event_type") val eventType: String,
+    val details: Map<String, String>? = null,
+)
+
+@Serializable
+data class DeviceEventResponseDto(
+    val status: String = "recorded",
+    @SerialName("event_type") val eventType: String,
+)

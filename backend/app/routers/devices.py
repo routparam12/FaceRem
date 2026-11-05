@@ -32,6 +32,8 @@ from ..schemas import (
     DeviceEnrollResponse,
     DeviceEnrollmentCodeRequest,
     DeviceEnrollmentCodeResponse,
+    DeviceEventRequest,
+    DeviceEventResponse,
     DeviceUpdateRequest,
 )
 from ..security import (
@@ -220,6 +222,34 @@ def enroll_device(
         access_token=access_token,
         token_type="bearer",
     )
+
+
+@router.post("/devices/me/events", response_model=DeviceEventResponse)
+def record_device_event(
+    payload: DeviceEventRequest,
+    request: Request,
+    principal: Principal = Depends(require_roles(Role.ATTENDANCE_DEVICE)),
+    db: Session = Depends(get_db),
+    _: Principal = Depends(tenant_scope),
+) -> DeviceEventResponse:
+    """Records an operational event from an authenticated kiosk device into the organization audit log."""
+    device_id = principal.device_id or principal.user_id
+    check_rate_limit(f"device_events:{device_id}", max_attempts=30, window_seconds=60)
+
+    # Sanitize and write audit log without secrets
+    record_audit(
+        db,
+        action=f"device.{payload.event_type.value.lower()}",
+        principal=principal,
+        target_type="device",
+        target_id=device_id,
+        request=request,
+        event_type=payload.event_type.value,
+        details=payload.details or {},
+    )
+    db.commit()
+
+    return DeviceEventResponse(status="recorded", event_type=payload.event_type)
 
 
 @router.get("/devices", response_model=list[AttendanceDeviceOut])
