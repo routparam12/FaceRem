@@ -19,3 +19,14 @@ local.properties
 
 
 .env
+
+
+.idea
+.kotlin
+.vscode
+
+# Android APK binaries
+*.apk
+frontend/public/downloads/*.apk
+web/public/downloads/*.apk
+public/downloads/*.apk

@@ -26,8 +26,6 @@ from PIL import Image
 from .config import get_settings
 from .security import AppError
 
-settings = get_settings()
-
 _CHALLENGE_TTL_SECONDS = 60
 _memory_challenges: dict[str, dict] = {}
 _challenge_lock = threading.Lock()
@@ -103,6 +101,7 @@ class ChallengeLivenessService(BaseLivenessService):
     AVAILABLE_ACTIONS = ["BLINK", "TURN_LEFT", "TURN_RIGHT"]
 
     def _store_challenge(self, challenge: LivenessChallenge) -> None:
+        settings = get_settings()
         key = f"liveness_challenge:{challenge.challenge_id}"
         if settings.redis_url:
             try:
@@ -125,6 +124,7 @@ class ChallengeLivenessService(BaseLivenessService):
             }
 
     def _consume_challenge(self, challenge_id: str) -> LivenessChallenge | None:
+        settings = get_settings()
         key = f"liveness_challenge:{challenge_id}"
         if settings.redis_url:
             try:
@@ -173,7 +173,10 @@ class ChallengeLivenessService(BaseLivenessService):
         primary_vector: list[float],
         tracking_bbox: tuple[float, float, float, float] | None = None,
     ) -> LivenessResult:
+        settings = get_settings()
         if settings.liveness_mode == "disabled":
+            if settings.is_production:
+                raise AppError("LIVENESS_FAILED", "Liveness verification cannot be disabled in production.", 500)
             return LivenessResult(True, 1.0, "disabled")
 
         if not challenge_id or not nonce:
@@ -250,7 +253,10 @@ class ChallengeLivenessService(BaseLivenessService):
         return LivenessResult(True, 0.95, "server_challenge", details)
 
     def verify_passive(self, frame_bytes: bytes) -> LivenessResult:
+        settings = get_settings()
         if settings.liveness_mode == "disabled":
+            if settings.is_production:
+                raise AppError("PASSIVE_LIVENESS_FAILED", "Passive liveness cannot be disabled in production.", 500)
             return LivenessResult(True, 1.0, "disabled")
 
         if not settings.allow_unconfigured_passive_liveness and settings.is_production:

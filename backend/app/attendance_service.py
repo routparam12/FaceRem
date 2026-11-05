@@ -51,7 +51,6 @@ from .schemas import FaceObservation, ObservationResult
 from .security import AppError, Principal, record_audit
 
 logger = logging.getLogger("faceattend.attendance")
-settings = get_settings()
 
 _cooldown_lock = threading.Lock()
 _memory_cooldown_store: dict[tuple[str, str], float] = {}
@@ -141,6 +140,7 @@ def compute_shift_lateness_and_date(
     Explicitly supports overnight shifts (e.g. 22:00 to 06:00).
     """
     moment_local = moment_utc.astimezone(tz)
+    settings = get_settings()
 
     if shift is not None:
         start_hour, start_minute = (int(p) for p in shift.start_time.split(":"))
@@ -224,6 +224,7 @@ def evaluate_assurance_policy(
 # ---------------------------------------------------------------------------
 
 def create_undo_token(event_id: str, organization_id: str, expires_in_seconds: int = 30) -> str:
+    settings = get_settings()
     now = datetime.now(timezone.utc)
     payload = {
         "sub": "attendance_undo",
@@ -237,6 +238,7 @@ def create_undo_token(event_id: str, organization_id: str, expires_in_seconds: i
 
 def verify_undo_token(token: str, organization_id: str) -> str:
     """Verifies the undo token and returns the event_id if valid and unexpired."""
+    settings = get_settings()
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
     except jwt.ExpiredSignatureError:
@@ -272,6 +274,7 @@ async def process_face_observation(
     5. Event emission and AttendanceRecord synchronization.
     """
     # 1. Observation Idempotency: check if already processed
+    settings = get_settings()
     existing_event = db.scalar(
         select(AttendanceEvent).where(
             AttendanceEvent.organization_id == organization_id,
@@ -670,6 +673,7 @@ def process_pin_attendance(
     and derives daily AttendanceRecord summary.
     """
     now = datetime.now(timezone.utc)
+    settings = get_settings()
     org = db.get(Organization, organization_id)
     org_tz = get_org_timezone(org)
     attendance_date, late_minutes, status = compute_shift_lateness_and_date(now, employee.shift, org_tz)
@@ -933,6 +937,7 @@ def undo_last_event(
     """Voids the last recorded event inside the 30-second window."""
     event_id = verify_undo_token(undo_token, organization_id)
     now = datetime.now(timezone.utc)
+    settings = get_settings()
 
     event = db.scalar(
         select(AttendanceEvent).where(

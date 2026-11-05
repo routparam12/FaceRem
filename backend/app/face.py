@@ -24,7 +24,6 @@ from .models import Employee, FaceProfile
 from .security import AppError
 
 logger = logging.getLogger("faceattend.face")
-settings = get_settings()
 
 _executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
@@ -198,7 +197,7 @@ class InsightFaceEngine:
     def __init__(self) -> None:
         from insightface.app import FaceAnalysis
 
-        self.model_name = settings.insightface_model_name
+        self.model_name = get_settings().insightface_model_name
         self._app = FaceAnalysis(
             name=self.model_name,
             allowed_modules=["detection", "recognition", "landmark_3d_68", "landmark_2d_106"],
@@ -417,7 +416,7 @@ class InsightFaceEngine:
 
 @lru_cache
 def get_engine():
-    if settings.face_engine == "insightface":
+    if get_settings().face_engine == "insightface":
         return InsightFaceEngine()
     return StubEngine()
 
@@ -521,10 +520,10 @@ def find_best_match(db: Session, organization_id: str, vector: list[float]) -> M
 
 
 def match_threshold() -> float:
-    configured = settings.face_match_threshold
+    configured = get_settings().face_match_threshold
     return configured if configured is not None else get_engine().default_threshold
 
 
 def match_margin() -> float:
-    configured = settings.face_match_margin
+    configured = get_settings().face_match_margin
     return configured if configured is not None else get_engine().default_margin

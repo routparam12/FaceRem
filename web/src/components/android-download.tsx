@@ -12,6 +12,7 @@ function AndroidIcon({ className }: { className?: string }) {
 /** The download block, used on the landing page and inside the console. */
 export default function AndroidDownload({ compact = false }: { compact?: boolean }) {
   const build = androidBuild();
+  if (!build.url) return null;
 
   const meta = [build.version && `Version ${build.version}`, build.sizeLabel, `Android ${build.minAndroid}+`]
     .filter(Boolean)

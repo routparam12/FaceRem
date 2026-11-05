@@ -185,6 +185,7 @@ def test_static_burst_fails_turn_left_right_and_blink_challenges(engine, faces, 
     """A static photo repeated across burst frames fails active yaw and blink challenges."""
     from app.config import get_settings
     monkeypatch.setattr(get_settings(), "face_engine", "insightface")
+    monkeypatch.setattr(get_settings(), "liveness_mode", "challenge")
 
     original, _ = faces
     frame_bytes = _jpeg(original)
@@ -237,6 +238,7 @@ def test_burst_identity_change_mid_burst_fails(engine, faces, liveness_service, 
     """A burst where the face identity changes mid-burst fails with identity shift."""
     from app.config import get_settings
     monkeypatch.setattr(get_settings(), "face_engine", "insightface")
+    monkeypatch.setattr(get_settings(), "liveness_mode", "challenge")
 
     person_a, person_b = faces
     bytes_a, bytes_b = _jpeg(person_a), _jpeg(person_b)
@@ -262,6 +264,7 @@ def test_burst_belonging_to_different_person_than_primary_fails(engine, faces, l
     """A burst where frames are genuine but belong to a different person than primary fails."""
     from app.config import get_settings
     monkeypatch.setattr(get_settings(), "face_engine", "insightface")
+    monkeypatch.setattr(get_settings(), "liveness_mode", "challenge")
 
     person_a, person_b = faces
     bytes_a, bytes_b = _jpeg(person_a), _jpeg(person_b)

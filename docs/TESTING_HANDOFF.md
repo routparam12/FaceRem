@@ -63,16 +63,19 @@ powershell -Command "$env:PYTHONPATH='backend'; $env:JWT_SECRET='test-secret-tha
 
 ## 3. Pre-Seeded Test Credentials
 
-When `SEED_DEMO_DATA=true` (or by running `backend\app\seed.py`), the database initializes with:
+When `SEED_DEMO_DATA=true` (or by running `backend\app\seed.py`), the database initializes with `DEMO_PASSWORD = "demo12345"` for all staff accounts across both demo tenants (`northwind` and `acme`):
 
 | Role | Email | Password | Organization Slug | Scoping / Notes |
 | :--- | :--- | :--- | :--- | :--- |
-| **Organization Admin** | `admin@northwind.demo` | `admin12345` | `northwind` | Full tenant access, devices, audit logs, timezone |
-| **HR Admin** | `hr@northwind.demo` | `demo12345` | `northwind` | People management, face enrollment, PIN resets |
-| **Manager** | `manager@northwind.demo` | `manager12345` | `northwind` | Scoped to assigned branch/department |
+| **Super Admin** | `root@faceattend.platform` | `demo12345` | *(Platform)* | Global platform operator, no organization |
+| **Organization Admin** | `admin@northwind.demo` | `demo12345` | `northwind` | Full tenant access, devices, cameras, audit logs, timezone |
+| **HR Admin** | `hr@northwind.demo` | `demo12345` | `northwind` | Staff management, face enrollment, PIN resets |
+| **Manager** | `manager@northwind.demo` | `demo12345` | `northwind` | Scoped to assigned branch/department |
 | **Kiosk Device** | *(Device Token)* | N/A | `northwind` | Enrolled via 6-character registration code |
-| **Employee 1** | Code: `NW-001` | PIN: `1234` | `northwind` | Enrolled Face Profile (`Jane Doe`) |
-| **Employee 2** | Code: `NW-002` | PIN: `5678` | `northwind` | Unenrolled Face Profile (`John Smith`) |
+| **Employee 1** | Code: `NW-E-1001` | PIN: `1234` | `northwind` | Aarav Sharma (Assigned to Head Office branch & General Shift) |
+| **Employee 2** | Code: `NW-E-1002` | *(No PIN)* | `northwind` | Priya Nair (Unenrolled, no initial branch/shift) |
+| **Employee 3** | Code: `NW-E-1003` | *(No PIN)* | `northwind` | Rahul Verma (Unenrolled, no initial branch/shift) |
+| **Second Tenant** | `admin@acme.demo` | `demo12345` | `acme` | Multi-tenant isolation verification (`AC-E-1001`) |
 
 ---
 
@@ -189,5 +192,32 @@ End-to-end recognition includes: Image decode + SCRFD face detection + 5-point a
    - If missing, migration `c7e2b14d9a3f` and `app/main.py` fail loudly and abort boot.
    - Creating extensions in PostgreSQL requires `SUPERUSER` or database owner privileges with `CREATE` on the database/schema.
 3. **BFF Proxy CSRF Protection**:
-   - All mutating requests (`POST`, `PATCH`, `DELETE`) forwarded through `/api/proxy/[...path]` enforce Same-Origin validation (`origin` matches `host`). External scripts or cross-site requests receive `403 CSRF_ERROR`.
+   - All mutating requests (`POST`, `PUT`, `PATCH`, `DELETE`) forwarded through `/api/proxy/[...path]` enforce Same-Origin validation (`origin` matches `host` or `sec-fetch-site: same-origin`). External scripts or cross-site requests receive `403 CSRF_ERROR`.
+
+---
+
+## 7. Implementation-Only Fix Round Summary
+
+### 7.1 Files Changed
+- **`web/src/app/api/proxy/[...path]/route.ts`**:
+  - `validateCsrf`: Rejects mutating requests (`POST`, `PUT`, `PATCH`, `DELETE`) unless `origin` matches `host` or `sec-fetch-site === "same-origin"`. Rejects if `host` is missing. Preserves allowed `GET` and `HEAD`. Added explicit `PUT` handler proxying.
+- **`web/src/lib/session.ts`**:
+  - `cookieOptions`: Sets `secure: true` when `process.env.NODE_ENV === "production"` by default, with `COOKIE_SECURE` (`"0"` or `"false"`) dev override. Retains `httpOnly: true` and `sameSite: "lax"`.
+- **`backend/app/liveness.py`**:
+  - Removed import-time `settings = get_settings()`. Evaluates `settings = get_settings()` at call time. In `verify_challenge()` and `verify_passive()`, if `liveness_mode == "disabled"` in production (`settings.is_production` or `settings.app_env == "production"`), fails closed with HTTP 500 `AppError`.
+- **`backend/app/face.py` & `backend/app/attendance_service.py`**:
+  - Removed import-time `settings = get_settings()`. Evaluates `settings = get_settings()` at call time inside engine and service methods.
+- **`backend/tests/test_face_engine.py`**:
+  - Configured monkeypatching of `liveness_mode = "challenge"` on the 3 challenge tests (`test_static_burst_fails_turn_left_right_and_blink_challenges`, `test_burst_identity_change_mid_burst_fails`, `test_burst_belonging_to_different_person_than_primary_fails`) to isolate from ambient environment variables.
+- **`web/src/components/login-form.tsx`**:
+  - Removed hardcoded credentials constant (`DEMO = { email: "hr@northwind.demo", password: "demo12345" }`). Demo prefill button is guarded by `NEXT_PUBLIC_DEMO_MODE === "1"` (disabled by default) and only fills email/slug, never the password.
+- **`web/src/components/android-download.tsx`**:
+  - Evaluates `ANDROID_APK_URL` (or fallback). Renders `null` if no APK URL is configured.
+- **`web/eslint.config.mjs`**:
+  - Added native ESLint 9 flat configuration using `@next/eslint-plugin-next` (`core-web-vitals`).
+- **`.gitignore`**:
+  - Added `*.apk`, `app/build/`, and `frontend/public/downloads/` entries.
+- **`frontend/` directory**:
+  - Removed all 38 legacy files and untracked APK asset (`git rm -r frontend`).
+
 

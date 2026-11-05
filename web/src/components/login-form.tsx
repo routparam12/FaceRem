@@ -5,8 +5,6 @@ import { useState } from "react";
 
 import { Banner, Button, Field } from "@/components/ui";
 
-const DEMO = { email: "hr@northwind.demo", password: "demo12345" };
-
 export default function LoginForm({ sessionExpired }: { sessionExpired: boolean }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -151,17 +149,18 @@ export default function LoginForm({ sessionExpired }: { sessionExpired: boolean 
         {pending ? "Signing in…" : "Sign in"}
       </Button>
 
-      <button
-        type="button"
-        onClick={() => {
-          setEmail(DEMO.email);
-          setPassword(DEMO.password);
-          setOrganization("northwind");
-        }}
-        className="w-full text-center text-sm font-medium text-brand-700 hover:text-brand-800"
-      >
-        Fill demo HR credentials
-      </button>
+      {process.env.NEXT_PUBLIC_DEMO_MODE === "1" && (
+        <button
+          type="button"
+          onClick={() => {
+            setEmail("hr@northwind.demo");
+            setOrganization("northwind");
+          }}
+          className="w-full text-center text-xs font-medium text-brand-700 hover:text-brand-800"
+        >
+          Fill demo HR email (northwind)
+        </button>
+      )}
     </form>
   );
 }

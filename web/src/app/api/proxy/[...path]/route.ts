@@ -44,24 +44,34 @@ const ALLOWED: Record<string, RegExp[]> = {
 };
 
 function validateCsrf(request: Request): boolean {
-  if (["GET", "HEAD", "OPTIONS"].includes(request.method)) return true;
+  if (["GET", "HEAD"].includes(request.method)) return true;
+
+  const host = request.headers.get("host");
+  if (!host) return false;
 
   const origin = request.headers.get("origin");
-  const host = request.headers.get("host");
-  if (!origin || !host) return true;
-
-  try {
-    const originHost = new URL(origin).host;
-    return originHost === host;
-  } catch {
-    return false;
+  if (origin) {
+    try {
+      const originHost = new URL(origin).host;
+      return originHost === host;
+    } catch {
+      return false;
+    }
   }
+
+  // When Origin is absent, allow only if Sec-Fetch-Site is "same-origin"
+  const secFetchSite = request.headers.get("sec-fetch-site");
+  if (secFetchSite === "same-origin") {
+    return true;
+  }
+
+  return false;
 }
 
 async function forward(
   request: Request,
   path: string[],
-  method: "GET" | "POST" | "PATCH" | "DELETE",
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
 ) {
   if (!validateCsrf(request)) {
     return NextResponse.json(
@@ -121,6 +131,10 @@ export async function GET(request: Request, context: { params: Promise<{ path: s
 
 export async function POST(request: Request, context: { params: Promise<{ path: string[] }> }) {
   return forward(request, (await context.params).path, "POST");
+}
+
+export async function PUT(request: Request, context: { params: Promise<{ path: string[] }> }) {
+  return forward(request, (await context.params).path, "PUT");
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ path: string[] }> }) {

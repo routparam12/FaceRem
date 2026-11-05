@@ -25,6 +25,7 @@ from ..models import (
     AttendanceEvent,
     AttendanceRecord,
     AttendanceStatus,
+    DeviceStatus,
     AuditLog,
     Camera,
     CameraAssurance,
@@ -38,6 +39,7 @@ from ..rate_limiter import check_rate_limit
 from ..schemas import (
     AttendanceEventOut,
     AttendanceOut,
+    AttentionItem,
     AuditLogOut,
     DashboardResponse,
     FaceObservation,
@@ -556,19 +558,16 @@ def dashboard(
     prov_query = select(AttendanceEvent).where(
         AttendanceEvent.organization_id == organization_id,
         AttendanceEvent.provisional.is_(True),
-        AttendanceEvent.confirmed_by_user_id.is_(None),
-        AttendanceEvent.voided.is_(False),
+        AttendanceEvent.voided_at.is_(None),
     )
-    if principal.branch_id is not None:
-        prov_query = prov_query.where(AttendanceEvent.branch_id == principal.branch_id)
-    prov_events = db.scalars(prov_query.order_by(AttendanceEvent.captured_at.desc()).limit(10)).all()
+    prov_events = db.scalars(prov_query.order_by(AttendanceEvent.occurred_at.desc()).limit(10)).all()
     provisional_count = len(prov_events)
     for pev in prov_events:
         attention_items.append(
             AttentionItem(
                 category="PROVISIONAL_EVENT",
-                title=f"Provisional Attendance Event ({pev.direction.value if hasattr(pev.direction, 'value') else pev.direction})",
-                description=f"Standard assurance scan on {pev.captured_at.strftime('%H:%M')} requires admin review.",
+                title=f"Provisional Attendance Event ({pev.type.value if hasattr(pev.type, 'value') else pev.type})",
+                description=f"Standard assurance scan on {pev.occurred_at.strftime('%H:%M')} requires admin review.",
                 target_id=pev.id,
                 action_url=f"/dashboard/attendance?highlight={pev.id}",
             )

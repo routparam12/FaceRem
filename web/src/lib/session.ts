@@ -9,10 +9,17 @@ export const REFRESH_COOKIE = "fa_refresh";
  * a token in localStorage is one XSS away from being exfiltrated.
  */
 export function cookieOptions(maxAgeSeconds: number) {
+  const isProduction = process.env.NODE_ENV === "production";
+  const explicitOverride = process.env.COOKIE_SECURE;
+  const secure =
+    explicitOverride !== undefined
+      ? explicitOverride === "1" || explicitOverride.toLowerCase() === "true"
+      : isProduction;
+
   return {
     httpOnly: true,
     sameSite: "lax" as const,
-    secure: process.env.COOKIE_SECURE === "1",
+    secure,
     path: "/",
     maxAge: maxAgeSeconds,
   };
