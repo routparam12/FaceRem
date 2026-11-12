@@ -173,7 +173,7 @@ class FakeDeviceCredentialStore(
     private val _credentials = MutableStateFlow(initial)
     override val credentials: StateFlow<DeviceCredentials?> = _credentials.asStateFlow()
 
-    private val _revocationEvents = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    private val _revocationEvents = MutableSharedFlow<String>(replay = 1, extraBufferCapacity = 1)
     override val revocationEvents: SharedFlow<String> = _revocationEvents.asSharedFlow()
 
     override fun getCredentials(): DeviceCredentials? = _credentials.value

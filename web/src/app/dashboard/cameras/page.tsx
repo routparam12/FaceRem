@@ -230,8 +230,8 @@ export default function CamerasPage() {
 
       {/* Add Camera Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 backdrop-blur-xs p-4">
+          <div className="glass-panel w-full max-w-md p-6 shadow-2xl">
             <h3 className="text-lg font-bold text-ink-900">Add Camera Source</h3>
             <form onSubmit={handleAddCamera} className="mt-4 space-y-4">
               <Field
@@ -249,7 +249,7 @@ export default function CamerasPage() {
                 <select
                   value={addDeviceId}
                   onChange={(e) => setAddDeviceId(e.target.value)}
-                  className="w-full rounded-lg border border-ink-200 bg-white px-3 py-2 text-xs font-medium text-ink-900"
+                  className="w-full rounded-lg border border-ink-200 bg-[var(--glass-input-bg)] px-3 py-2 text-xs font-medium text-ink-900"
                 >
                   {devices.map((d) => (
                     <option key={d.id} value={d.id}>
@@ -266,7 +266,7 @@ export default function CamerasPage() {
                 <select
                   value={addSourceType}
                   onChange={(e) => setAddSourceType(e.target.value as "ANDROID_KIOSK" | "EDGE_AGENT")}
-                  className="w-full rounded-lg border border-ink-200 bg-white px-3 py-2 text-xs font-medium text-ink-900"
+                  className="w-full rounded-lg border border-ink-200 bg-[var(--glass-input-bg)] px-3 py-2 text-xs font-medium text-ink-900"
                 >
                   <option value="ANDROID_KIOSK">ANDROID_KIOSK (Built-in Camera)</option>
                   <option value="EDGE_AGENT">EDGE_AGENT (RTSP / Network Stream)</option>
@@ -281,7 +281,7 @@ export default function CamerasPage() {
                   <select
                     value={addDirection}
                     onChange={(e) => setAddDirection(e.target.value as "AUTO" | "IN_ONLY" | "OUT_ONLY")}
-                    className="w-full rounded-lg border border-ink-200 bg-white px-3 py-2 text-xs font-medium text-ink-900"
+                    className="w-full rounded-lg border border-ink-200 bg-[var(--glass-input-bg)] px-3 py-2 text-xs font-medium text-ink-900"
                   >
                     <option value="AUTO">AUTO</option>
                     <option value="IN_ONLY">IN_ONLY</option>
@@ -296,7 +296,7 @@ export default function CamerasPage() {
                   <select
                     value={addAssurance}
                     onChange={(e) => setAddAssurance(e.target.value as "HIGH" | "STANDARD")}
-                    className="w-full rounded-lg border border-ink-200 bg-white px-3 py-2 text-xs font-medium text-ink-900"
+                    className="w-full rounded-lg border border-ink-200 bg-[var(--glass-input-bg)] px-3 py-2 text-xs font-medium text-ink-900"
                   >
                     <option value="HIGH">HIGH (Challenge Liveness)</option>
                     <option value="STANDARD">STANDARD (Provisional without Liveness)</option>
@@ -324,8 +324,8 @@ export default function CamerasPage() {
 
       {/* Edit Camera Modal */}
       {editingCamera && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 backdrop-blur-xs p-4">
+          <div className="glass-panel w-full max-w-md p-6 shadow-2xl">
             <h3 className="text-lg font-bold text-ink-900">Configure Camera</h3>
             <form onSubmit={handleUpdateCamera} className="mt-4 space-y-4">
               <Field
@@ -343,7 +343,7 @@ export default function CamerasPage() {
                   <select
                     value={editDirection}
                     onChange={(e) => setEditDirection(e.target.value as "AUTO" | "IN_ONLY" | "OUT_ONLY")}
-                    className="w-full rounded-lg border border-ink-200 bg-white px-3 py-2 text-xs font-medium text-ink-900"
+                    className="w-full rounded-lg border border-ink-200 bg-[var(--glass-input-bg)] px-3 py-2 text-xs font-medium text-ink-900"
                   >
                     <option value="AUTO">AUTO</option>
                     <option value="IN_ONLY">IN_ONLY</option>
@@ -358,7 +358,7 @@ export default function CamerasPage() {
                   <select
                     value={editAssurance}
                     onChange={(e) => setEditAssurance(e.target.value as "HIGH" | "STANDARD")}
-                    className="w-full rounded-lg border border-ink-200 bg-white px-3 py-2 text-xs font-medium text-ink-900"
+                    className="w-full rounded-lg border border-ink-200 bg-[var(--glass-input-bg)] px-3 py-2 text-xs font-medium text-ink-900"
                   >
                     <option value="HIGH">HIGH</option>
                     <option value="STANDARD">STANDARD</option>

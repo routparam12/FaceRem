@@ -1,380 +1,223 @@
-# FaceAttend backend — proof of concept
+# FaceAttend Backend
 
-A deliberately small FastAPI service covering the two things that decide whether this product
-works: **multi-tenant RBAC** and **server-side face recognition**. Twelve source files, SQLite,
-no infrastructure to stand up.
+The core FastAPI service powering multi-tenant identity, biometric face recognition, kiosk check in / check out, and attendance reporting.
+
+---
+
+## Quick Start
+
+### Installation & Run
 
 ```bash
 cd backend
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate       # Windows PowerShell: .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-cp .env.example .env          # then change JWT_SECRET
-uvicorn app.main:app --reload
+cp .env.example .env
+alembic upgrade head
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Interactive docs: <http://127.0.0.1:8000/docs>
+* **Interactive OpenAPI Docs:** <http://127.0.0.1:8000/docs>
+* **Raw OpenAPI JSON:** <http://127.0.0.1:8000/openapi.json>
+* **Complete Endpoint Documentation:** See [`docs/API.md`](../docs/API.md) (generated via `python backend/scripts/generate_api_docs.py`).
 
-## Demo logins
+### Seeding Behavior
+Setting `SEED_DEMO_DATA=true` seeds two organizations (`northwind` and `acme`) with standard shifts, departments, staff accounts, and dummy employees. Passwords default to `demo12345`. If any organization already exists in the database, seeding is safely skipped.
 
-Password for all of them: `demo12345`. Two organizations exist so tenant isolation is real and
-testable.
+---
 
-| Email | Role | Can do |
-| --- | --- | --- |
-| `admin@northwind.demo` | `ORG_ADMIN` | everything in its organization, including audit logs |
-| `hr@northwind.demo` | `HR_ADMIN` | manage employees, enroll and revoke faces, run scans |
-| `manager@northwind.demo` | `MANAGER` | read employees, attendance, dashboard |
-| `employee@northwind.demo` | `EMPLOYEE` | own profile and own attendance only |
-| `kiosk@northwind.demo` | `ATTENDANCE_DEVICE` | run recognition scans, nothing else |
-| `root@faceattend.platform` | `SUPER_ADMIN` | platform account — **blocked** from tenant data |
+## Environment Variables (`app/config.py`)
 
-Swap `northwind` for `acme` for the second organization.
+| Name | Default | Purpose | Production Requirement |
+| :--- | :--- | :--- | :--- |
+| `APP_ENV` | `"dev"` | Environment mode (`dev`, `test`, `staging`, `production`). | Optional |
+| `DATABASE_URL` | `"sqlite:///./faceattend.db"` | SQLAlchemy database connection string. | Required to be PostgreSQL in production. |
+| `JWT_SECRET` | `"dev-only-insecure-secret-change-me"` | Secret for signing HS256 JWT access and refresh tokens. | **Required** (>= 32 bytes; refuses default value). |
+| `JWT_ALGORITHM` | `"HS256"` | JWT signature algorithm. | Optional |
+| `ACCESS_TOKEN_MINUTES` | `30` | Access token lifetime. | Optional |
+| `REFRESH_TOKEN_DAYS` | `14` | Refresh token lifetime. | Optional |
+| `TOTP_ENCRYPTION_KEY` | `"dev-only-totp-encryption-key-32b!"` | 32-byte secret for AES-256-GCM encryption of TOTP keys at rest. | **Required** (>= 32 bytes; refuses default value). |
+| `REDIS_URL` | `None` | Redis connection URL for distributed rate limiting. | **Required** in production (must be reachable on startup). |
+| `FACE_ENGINE` | `"insightface"` | Face embedding engine (`"insightface"` or `"stub"`). | Must be `"insightface"` in production (`stub` is rejected). |
+| `INSIGHTFACE_MODEL_NAME` | `"buffalo_l"` | InsightFace ONNX model bundle name. | Optional |
+| `FACE_MATCH_THRESHOLD` | `None` | Cosine similarity match threshold. Uses engine default (0.45 ArcFace, 0.62 stub) if unset. | Optional |
+| `FACE_MATCH_MARGIN` | `None` | Margin requirement between best and second-best candidate (default 0.05). | Optional |
+| `LIVENESS_MODE` | `"challenge"` | Anti-spoofing mode (`"disabled"`, `"challenge"`, `"passive"`, `"client_attested"`). | Must not be `"disabled"` in production. |
+| `LIVENESS_THRESHOLD` | `0.7` | Minimum liveness score for verification. | Optional |
+| `ALLOW_UNCONFIGURED_PASSIVE_LIVENESS` | `False` | Overrides production requirement for passive liveness model. | Required if passive model weights are not loaded. |
+| `CHECKOUT_AFTER_MINUTES` | `240` | Cooldown window before a second scan counts as check-out. | Optional |
+| `SHIFT_START_HOUR` | `9` | Fallback daily start hour for lateness derivation when shift is unassigned. | Optional |
+| `SHIFT_GRACE_MINUTES` | `10` | Grace minutes past shift start before marking record `LATE`. | Optional |
+| `ATTENDANCE_COOLDOWN_SECONDS` | `60` | Cooldown period between successive scans for the same employee. | Optional |
+| `UNDO_WINDOW_SECONDS` | `30` | Time window to cancel an accidental check-in via `/attendance/undo`. | Optional |
+| `STANDARD_ASSURANCE_PROVISIONAL` | `True` | Flags scans from standard cameras without liveness as provisional. | Optional |
+| `SEED_DEMO_DATA` | `False` | Triggers initial demo seed if database is empty. | Optional |
+| `ALLOW_LEGACY_KIOSK_LOGIN` | `True` | Allows username/password sign-in for kiosks in development. | Disabled automatically in production. |
 
-## Endpoints
+---
 
-```text
-POST   /api/v1/auth/login                          public
-POST   /api/v1/auth/refresh                        public
-GET    /api/v1/auth/me                             any signed-in user
+## Roles and Permissions Matrix
 
-GET    /api/v1/employees                           ORG_ADMIN, HR_ADMIN, MANAGER  (?include_inactive=)
-POST   /api/v1/employees                           ORG_ADMIN, HR_ADMIN
-GET    /api/v1/employees/{id}                      ORG_ADMIN, HR_ADMIN, MANAGER
-PUT    /api/v1/employees/{id}                      ORG_ADMIN, HR_ADMIN   (partial update)
-DELETE /api/v1/employees/{id}                      ORG_ADMIN, HR_ADMIN   (soft delete: deactivates,
-                                                                           revokes face, keeps history)
-POST   /api/v1/employees/{id}/face/enroll          ORG_ADMIN, HR_ADMIN   (multipart + consent)
-DELETE /api/v1/employees/{id}/face                 ORG_ADMIN, HR_ADMIN   (keeps attendance)
+Read from `app/deps.py` and router dependencies.
 
-GET    /api/v1/departments                         ORG_ADMIN, HR_ADMIN, MANAGER
-POST   /api/v1/departments                         ORG_ADMIN, HR_ADMIN   (also created implicitly
-                                                                           by employee create/update)
-DELETE /api/v1/departments/{id}                     ORG_ADMIN, HR_ADMIN   (409 if still in use)
+| Role | Classification | Permissions & Endpoints |
+| :--- | :--- | :--- |
+| `SUPER_ADMIN` | Platform Operator | Platform maintenance only. **Explicitly barred** from tenant routes by `tenant_scope`. |
+| `ORGANIZATION_ADMIN` | Tenant Staff | Full tenant control: manages employees, face profiles, kiosk devices, cameras, reports, audit logs, and organization settings. |
+| `HR_ADMIN` | Tenant Staff | People operations: creates/updates employees, enrolls and revokes face profiles, manages kiosk devices and cameras, views reports. Scoped to branch/department if assigned. |
+| `MANAGER` | Tenant Staff | Read-only access to employees, daily attendance, dashboard, and reports. Scoped to branch/department if assigned. |
+| `ATTENDANCE_DEVICE` | Dedicated Hardware | Kiosk identity: runs `/attendance/recognize`, `/attendance/scan`, `/attendance/challenge`, and device heartbeats. Blocked from admin routes. |
+| `EMPLOYEE` | Data Record | Not a staff sign-in role. Represents an individual on the roster with an employee code and optional 4-digit PIN for fallback kiosk check-in. |
 
-GET    /api/v1/branches                            ORG_ADMIN, HR_ADMIN, MANAGER
-POST   /api/v1/branches                            ORG_ADMIN, HR_ADMIN
-DELETE /api/v1/branches/{id}                       ORG_ADMIN, HR_ADMIN   (409 if still in use)
+---
 
-GET    /api/v1/shifts                              ORG_ADMIN, HR_ADMIN, MANAGER
-POST   /api/v1/shifts                              ORG_ADMIN, HR_ADMIN
-DELETE /api/v1/shifts/{id}                         ORG_ADMIN, HR_ADMIN   (409 if still in use)
+## Authentication & Credentials
 
-POST   /api/v1/attendance/recognize                ATTENDANCE_DEVICE, ORG_ADMIN, HR_ADMIN
-GET    /api/v1/attendance                          staff see all; EMPLOYEE sees only own
-GET    /api/v1/dashboard                           ORG_ADMIN, HR_ADMIN, MANAGER
-GET    /api/v1/audit-logs                          ORG_ADMIN
-```
+* **Staff Sign-in (`POST /api/v1/auth/login`):**
+  Accepts email, password, and optional organization slug. If 2FA is active, returns a short-lived challenge token (`totp_required=True`).
+* **Two-Factor Authentication (2FA / TOTP):**
+  RFC 6238 TOTP secrets are encrypted at rest with AES-256-GCM using `TOTP_ENCRYPTION_KEY`. Setup (`/auth/totp/setup`) provides an `otpauth://` provisioning URI; verification (`/auth/totp/verify`) issues 8 single-use hashed recovery backup codes. In production, unconfigured admins receive a scoped `totp_setup` token that blocks all API access until 2FA is enabled.
+* **Token Refresh Rotation (`POST /api/v1/auth/refresh`):**
+  Issues a new access token and burns the old refresh token. Refresh tokens are stored as SHA-256 hashes in `refresh_tokens`. Presenting an already-consumed refresh token triggers theft detection, instantly revoking all active sessions for that user.
+* **Device Credentials (`POST /api/v1/devices/enroll`):**
+  Kiosks receive a non-refreshing JWT valid for 365 days. To ensure instant revocation, `security.py:get_principal` queries the database on every device request to confirm `AttendanceDevice.status == ACTIVE` and `revoked_at IS NULL`.
 
-Every response uses the project envelope:
+---
 
-```json
-{ "success": true, "data": {}, "message": "Operation successful" }
-{ "success": false, "error": { "code": "FACE_NOT_RECOGNIZED", "message": "Face could not be recognized." } }
-```
+## Kiosk Hardware Pairing
 
-## Try it
+1. **Enrollment Code Generation (`POST /api/v1/devices/enrollment-code`):**
+   An authenticated administrator generates an 8-character single-use code valid for 15 minutes (`DeviceEnrollmentCode`).
+2. **Device Registration (`POST /api/v1/devices/enroll`):**
+   The physical kiosk sends the enrollment code and its hardware identifier. The server hashes the code, checks validity, creates an `AttendanceDevice` record, marks the code used, and issues device credentials.
+3. **Revocation (`POST /api/v1/devices/{id}/revoke`):**
+   Setting `revoked_at` instantly invalidates the device's authorization on its very next HTTP call.
+4. **Buffered Device Events (`POST /api/v1/devices/me/events`):**
+   Allows kiosks to sync offline-buffered operational status logs.
+
+---
+
+## Attendance Processing Engine
+
+* **Scan & Recognition (`POST /api/v1/attendance/recognize`, `/attendance/scan`):**
+  Processes face observations against active organization embeddings. Filters by organization before similarity matching.
+* **Cooldown Enforcement:**
+  Enforced in `attendance_service.py:process_face_observation`. If an employee checks in and is detected again within `ATTENDANCE_COOLDOWN_SECONDS` (60s), the event is recorded as `COOLDOWN_SUPPRESSED` without altering records.
+* **Check-out Delay Window (`CHECKOUT_AFTER_MINUTES`):**
+  Within 240 minutes of check-in, repeat scans return `ALREADY_PRESENT`. After 240 minutes, a scan writes `check_out_at` and sets status to `CHECK_OUT`.
+* **Challenge Liveness (`POST /api/v1/attendance/challenge`):**
+  Issues randomized challenges (blink, nod, smile). Rejects unverified client scores when in challenge mode.
+* **Directionality per Camera:**
+  Configured per camera in `cameras` (`IN_ONLY`, `OUT_ONLY`, `BIDIRECTIONAL`). An `IN_ONLY` camera will reject check-out attempts (`DIRECTION_MISMATCH`).
+* **Assurance & Provisional Status:**
+  Scans from standard assurance cameras without confirmed liveness create provisional events that require admin confirmation (`/attendance/events/{id}/confirm`).
+* **Undo Window (`POST /api/v1/attendance/undo`):**
+  Within 30 seconds of an accidental check-in, the kiosk can present the `undo_token` to delete the check-in record.
+* **Lateness & Shifts:**
+  Compares arrival against the assigned `Shift` start time plus `grace_period_minutes`. Records late minutes and marks status as `LATE`.
+
+---
+
+## Face Recognition Pipeline
+
+* **Engine:** InsightFace ArcFace (`buffalo_l`, 512-dimensional normalized embeddings).
+* **Test Stub:** Deterministic 256-dimensional grayscale descriptor for test execution without model weight downloads.
+* **Thresholds & Margin:**
+  * ArcFace default threshold: `0.45` cosine similarity.
+  * Stub default threshold: `0.62`.
+  * Margin requirement: `0.05` separation between best candidate and runner-up to prevent ambiguous matches.
+* **Multi-Pose Enrollment:**
+  `POST /api/v1/employees/{id}/face/enroll` accepts three camera frames (`front_frame`, `left_frame`, `right_frame`) and explicit `consent=true`. Each frame is evaluated for head pose, yaw, pitch, roll, blur, and lighting before generating embeddings.
+* **PostgreSQL vs SQLite:**
+  PostgreSQL uses `VectorType(512)` mapped to `pgvector.sqlalchemy.VECTOR(512)`. SQLite falls back to JSON-serialized vectors. In both environments, nearest-neighbor matching is computed in Python using `numpy` dot product across organization-scoped records.
+* **Production Startup Checks (`main.py`):**
+  Startup raises `RuntimeError` if:
+  1. Alembic migrations have not run (`organizations` table missing).
+  2. `APP_ENV=production` and `JWT_SECRET` or `TOTP_ENCRYPTION_KEY` are using insecure defaults or < 32 bytes.
+  3. `REDIS_URL` is missing or unreachable.
+  4. `FACE_ENGINE` is set to `"stub"`.
+  5. `LIVENESS_MODE` is set to `"disabled"`.
+  6. PostgreSQL is used but the `vector` (pgvector) extension is not installed or `embedding_vec` column is missing.
+  7. Passive liveness is unconfigured and `ALLOW_UNCONFIGURED_PASSIVE_LIVENESS` is false.
+* **Model Weights & Documentation:** Detailed pipeline specifications and model weight licensing notes are documented in [`docs/FACE_PIPELINE.md`](../docs/FACE_PIPELINE.md).
+
+---
+
+## Privacy, Storage, & Data Retention
+
+* **Biometric Templates:**
+  Embeddings are stored as 512-dimensional floating-point vectors in `face_profiles`. Raw facial images from enrollment are not retained in the database.
+* **Employee Avatar Photos:**
+  The front-facing enrollment frame is saved to `storage/avatars/{org_id}/{employee_id}.jpg` and served to authenticated staff via `GET /api/v1/employees/{id}/avatar`.
+* **Rolling 7-Day Kiosk Scan Photos:**
+  Kiosk recognition events optionally save an audit frame to `storage/scans/{org_id}/{employee_id}/{timestamp}_{event_id}.jpg`.
+* **Automated Retention Purge:**
+  `storage.py:prune_scan_photos` runs automatically on each scan save, deleting any snapshot older than 7 days (`max_age_days=7`). Access to audit snapshots is restricted to tenant administrators via `/api/v1/employees/{id}/recent-scans`.
+
+---
+
+## Data Model (15 Tables)
+
+Real tables declared in `app/models.py`:
+
+| Table Name | Entity | Purpose |
+| :--- | :--- | :--- |
+| `organizations` | `Organization` | Tenant boundary with unique slug and display name. |
+| `subscriptions` | `Subscription` | SaaS entitlement tier and active employee seat limit enforcement. |
+| `users` | `User` | Staff login credentials, roles, encrypted TOTP secrets, and recovery codes. |
+| `refresh_tokens` | `RefreshToken` | Hashed single-use session refresh tokens with reuse detection. |
+| `departments` | `Department` | Organization departments for personnel grouping and analytics. |
+| `branches` | `Branch` | Physical office, branch, or facility locations. |
+| `shifts` | `Shift` | Work schedules with start/end hours, grace periods, and half-day thresholds. |
+| `employees` | `Employee` | Personnel roster records with department/shift bindings and PIN hash. |
+| `face_profiles` | `FaceProfile` | 512-dim biometric embeddings, pose labels, quality scores, and consent timestamps. |
+| `attendance_devices`| `AttendanceDevice` | Enrolled physical kiosk hardware records and revocation status. |
+| `device_enrollment_codes` | `DeviceEnrollmentCode` | Single-use 15-minute pairing tokens for kiosks. |
+| `cameras` | `Camera` | Registered optical sensors, RTSP streams, directionality, and assurance levels. |
+| `attendance_records`| `AttendanceRecord` | Daily attendance roll-up per employee per date (in, out, status, late minutes). |
+| `attendance_events` | `AttendanceEvent` | Immutable stream of raw scan transactions, confidence scores, and undo tokens. |
+| `audit_logs` | `AuditLog` | Audit log of administrative operations, credential events, and biometric deletions. |
+
+---
+
+## API Reference
+
+API documentation is generated directly from the OpenAPI specification using the project generator script:
 
 ```bash
-TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"hr@northwind.demo","password":"demo12345"}' | python3 -c 'import json,sys;print(json.load(sys.stdin)["data"]["access_token"])')
-
-EMP=$(curl -s localhost:8000/api/v1/employees -H "Authorization: Bearer $TOKEN" \
-  | python3 -c 'import json,sys;print(json.load(sys.stdin)["data"][0]["id"])')
-
-curl -X POST "localhost:8000/api/v1/employees/$EMP/face/enroll" \
-  -H "Authorization: Bearer $TOKEN" -F image=@face.jpg -F consent=true
-
-curl -X POST localhost:8000/api/v1/attendance/recognize \
-  -H "Authorization: Bearer $TOKEN" \
-  -F image=@face.jpg -F liveness_score=0.95 -F device_label=lobby-1
+python backend/scripts/generate_api_docs.py
 ```
 
-## How RBAC and tenant isolation work
+The resulting reference documentation is maintained at [`docs/API.md`](../docs/API.md).
 
-`Principal` is built from the JWT, and it carries the organization id. A client-supplied
-`organization_id` is never read from a request body or query string.
-
-- `require_roles(...)` gates each route by role.
-- `tenant_scope` guarantees the caller belongs to exactly one organization before any tenant
-  query runs, and **rejects `SUPER_ADMIN`**: platform staff should not be able to read a
-  customer's employees or biometric data through the ordinary API.
-- Cross-tenant reads answer `404`, not `403`, so one tenant cannot use error codes to confirm
-  that another tenant's record ids exist.
-- `find_best_match` filters by organization *before* similarity, never after. A face is never
-  compared against another tenant's profiles.
-
-## Accounts and roles
-
-A tenant is created by signing up; everyone else is created by someone already inside it.
-
-```text
-POST /auth/signup   ->  new Organization + its first ORG_ADMIN   (public)
-POST /users         ->  ORG_ADMIN or HR_ADMIN creates a login
-```
-
-Who may hand out which role — the table that stops privilege escalation:
-
-| Actor | Can create / assign |
-| --- | --- |
-| `ORG_ADMIN` | `ORG_ADMIN`, `HR_ADMIN`, `MANAGER`, `EMPLOYEE`, `ATTENDANCE_DEVICE` |
-| `HR_ADMIN` | `MANAGER`, `EMPLOYEE`, `ATTENDANCE_DEVICE` |
-| everyone else | nothing |
-
-`SUPER_ADMIN` is in no row, so platform access can never be granted through the tenant API.
-On top of that: nobody can change their own role or deactivate themselves, and the last
-active `ORG_ADMIN` cannot be demoted or disabled — otherwise a tenant could lock itself out.
-
-## Sessions
-
-Refresh tokens are stored as SHA-256 hashes and **rotate on every use**: refreshing burns
-the old token and issues a new one. That is what makes logout mean something.
-
-- `POST /auth/logout` revokes the presented refresh token.
-- `POST /auth/change-password` revokes every other session, which is usually the point.
-- Deactivating a user revokes their live sessions, not just future logins.
-- Presenting an already-used refresh token is treated as **theft**: every session for that
-  user is ended and the caller gets `TOKEN_REUSED`.
-
-Access tokens are not revocable — they are short-lived instead (`ACCESS_TOKEN_MINUTES`).
-
-## Plans and seats
-
-`subscriptions` is what makes this a SaaS rather than a single-tenant app: without it the
-`plan` string was decorative and a trial tenant could add unlimited people.
-
-| Plan | Seats |
-| --- | --- |
-| `TRIAL` | 25 |
-| `STARTER` | 100 |
-| `GROWTH` | 500 |
-| `ENTERPRISE` | 100,000 |
-
-Seats are counted in **active employees**, not logins — that is what an attendance product
-meters. `POST /employees` refuses with `SEAT_LIMIT_REACHED` (402) when the plan is full,
-checked at creation because a tenant already over its limit has no good remedy.
-
-Signup starts a 14-day `TRIALING` subscription. `GET /subscription` shows the plan and
-usage to an org or HR admin.
-
-Status affects sign-in deliberately:
-
-- `CANCELLED` blocks login with `SUBSCRIPTION_CANCELLED`.
-- `PAST_DUE` still works. A failed payment should start dunning, not lock a factory out of
-  its attendance gate.
-
-## Face recognition
-
-Two engines, chosen with `FACE_ENGINE`:
-
-| | `insightface` (default) | `stub` |
-| --- | --- | --- |
-| What it is | ArcFace embeddings, `buffalo_l` | 256-dim grayscale descriptor |
-| Dimensions | 512 | 256 |
-| Threshold | 0.45 | 0.62 |
-| Real recognition | yes | **no** |
-
-Measured on the same pair of photos — one person shot twice under different light and
-angle, versus two different people:
-
-| | ArcFace | stub |
-| --- | --- | --- |
-| Same person, different photo | **+0.846** | +0.634 |
-| Two different people | **−0.013** | +0.347 |
-| Separation | **0.859** | 0.287 |
-
-The stub clears its own threshold by 0.014. That is not recognition, it is a coincidence
-with a margin — which is why it exists only to keep the API suite fast and model-free.
-
-**Thresholds belong to the engine, not to the config.** `FACE_MATCH_THRESHOLD` is unset by
-default so each engine supplies its own; reusing the stub's 0.62 with ArcFace would reject
-the same person photographed in different light.
-
-The ~280 MB model downloads to `~/.insightface` on first use, so the first request after a
-cold start is slow. Nothing matches below the threshold: the nearest candidate is never
-returned, and an unknown face learns nothing about the roster.
-
-### Tightly cropped photos
-
-Employee photos often arrive as bare head crops. The detector needs *context* around a
-face, not more pixels — upscaling a 112×112 crop still finds nothing, while padding it
-finds the face immediately. The engine retries with a margin rather than rejecting a
-perfectly usable picture.
-
-### Switching engines requires re-enrollment
-
-Embeddings from different models are not comparable — different dimensions, different
-vector space. `find_best_match` filters to the active model in SQL, so profiles enrolled
-under another engine are simply invisible: those people must enroll again. Filtering in SQL
-also stops a mixed table from producing a ragged matrix, which would raise rather than
-merely fail to match.
-
-## Liveness and the KBY-AI SDK
-
-[`kby-ai/FaceLivenessDetection-Android`](https://github.com/kby-ai/FaceLivenessDetection-Android)
-is an **on-device, liveness-only** SDK. `FaceSDK.faceDetection(bitmap)` returns `FaceBox` objects
-carrying a rectangle, a liveness score and yaw/roll/pitch. It needs `FaceSDK.setActivation(key)`
-with a commercial licence key bound to your application id, and that tier does **not** produce
-face embeddings — recognition stays on this server either way.
-
-So the split is:
-
-```text
-Android: detect face -> quality checks -> KBY-AI liveness score
-            |
-            v  multipart: image + liveness_score
-Server:  enforce liveness threshold -> ArcFace embedding
-      -> organization-scoped vector search -> confidence check
-      -> attendance rules -> audit log
-```
-
-`LIVENESS_MODE=client_attested` enforces `LIVENESS_THRESHOLD` against the score the client sends.
-**A client-reported score is evidence, not proof** — a modified client can send any number. The
-mode is an explicit setting rather than an assumption so this decision stays visible. Before
-production, replace it with a server-side check or with an attestation the server can verify
-(Play Integrity plus an SDK-signed result). `LIVENESS_MODE=disabled` skips the check entirely and
-is for local development only.
-
-To wire the SDK into the Android client: add `libfacesdk` per the KBY-AI README, call
-`FaceSDK.setActivation(BuildConfig.KBYAI_LICENSE)` at startup, and feed the analyzer's bitmap to
-`FaceSDK.faceDetection(...)`. The existing `FaceQualityEvaluator` already gates frames on pose,
-size, centring and brightness, so the liveness score becomes one more condition before capture.
-
-## What this PoC deliberately does not do
-
-SQLite instead of PostgreSQL + pgvector (matching is a numpy dot product; the query to replace is
-noted in `face.py`). No Alembic — tables are created at startup. Refresh tokens are stateless, so
-they cannot be revoked. No rate limiting. No shift/branch/department modelling beyond a flat
-`SHIFT_START_HOUR`. Secrets come from `.env`, not a managed secret store.
-
-## Tests
-
-```bash
-pytest                          # 62 tests
-pytest tests/test_api.py        # 53 — API, RBAC, tenant isolation, sessions, seats
-pytest tests/test_face_engine.py  # 9 — the real engine
-```
-
-`test_api.py` runs on the stub so it stays fast and needs no model. `test_face_engine.py`
-loads the real one and is skipped automatically when insightface is not installed, so the
-suite still passes on a machine without it.
-
-Tenant-isolation cases are the ones that matter most: they prove an admin in one
-organization gets 403 or 404 on another organization's employees, attendance, face
-profiles and users.
-
-## Testing from a real Android phone
-
-The emulator reaches this machine at `10.0.2.2`; a phone cannot. It needs the LAN address,
-and three things have to line up.
-
-**1. Bind the server to every interface.** The default only listens on loopback, which the
-phone cannot reach:
-
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
-**2. Build the app against this machine's address.** The URL is compiled into the APK, so
-it is a build property rather than a runtime setting:
-
-```bash
-ipconfig getifaddr en0                                        # e.g. 192.168.1.28
-./gradlew assembleDebug -Pfaceattend.apiHost=192.168.1.28
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-```
-
-**3. Check the phone can actually see the server.** Open `http://<ip>:8000/health` in the
-phone's browser before blaming the app. If that fails, the app will too.
-
-### When it does not connect
-
-- **macOS firewall.** It is on by default and blocks incoming connections to Python. Allow
-  it in System Settings → Network → Firewall → Options, or turn the firewall off while
-  testing. This is the usual cause.
-- **Different networks.** Phone on mobile data, or the Mac on a different Wi-Fi band that
-  is client-isolated. Guest networks often block device-to-device traffic entirely.
-- **The IP changed.** DHCP reassigns it. Rebuild the APK with the new one.
-
-Cleartext HTTP is permitted only in debug builds — `app/src/debug/res/xml/network_security_config.xml`
-replaces the restrictive config in `src/main` for debug, so release builds still require TLS
-with no exemption.
+---
 
 ## Testing
 
-The project uses `pytest` with a `@pytest.mark.slow` marker distinguishing fast unit/integration tests from heavy ML inference (`InsightFaceEngine` ArcFace loading) and live PostgreSQL tests.
-
-### Running Tests
-
 ```powershell
-# 1. Fast Suite (recommended during development):
+# 1. Fast Suite (skips heavy ML model downloads and inference):
 & .\backend\.venv\Scripts\python.exe -m pytest backend/tests -m "not slow" -v
 
-# 2. Single test file (e.g. attendance or auth):
-& .\backend\.venv\Scripts\python.exe -m pytest backend/tests/test_phase4_attendance.py -v
-
-# 3. Full Suite (including ML model inference):
+# 2. Full Suite (runs all unit and integration tests):
 & .\backend\.venv\Scripts\python.exe -m pytest backend/tests -v
+
+# 3. Live PostgreSQL Migration Test (requires running Postgres instance):
+$env:POSTGRES_TEST_URL="postgresql+psycopg://postgres:postgres@localhost:5432/facerem_test"
+& .\backend\.venv\Scripts\python.exe -m pytest backend/tests/test_postgres_migration.py -v
 ```
 
-> **Windows Sandbox Note:**
-> On Windows, Starlette / FastAPI's `TestClient` uses an internal `asyncio` event loop whose `socketpair()` creates a loopback TCP connection on `127.0.0.1`. Under strict sandbox isolation with loopback networking blocked, `TestClient.__enter__()` hangs waiting for the socket pair handshake. When running tests in automation or agents on Windows, always execute tests outside network isolation (`BypassSandbox: true`).
+* **Test Isolation:** `backend/tests/conftest.py` configures a session-scoped temporary SQLite database. The local development `./faceattend.db` database is never altered by test runs.
+* **Windows Sandbox Note:** Starlette's `TestClient` uses an internal asyncio loop that binds to loopback sockets (`127.0.0.1`). If running under an environment that blocks local network loopback, tests must be run with sandbox loopback permitted.
 
-> **Test Database Isolation Note:**
-> Tests automatically execute against an isolated session-scoped temporary SQLite database managed by `backend/tests/conftest.py`. The local development `./faceattend.db` database in the repository working directory is never touched, seeded, or polluted by test runs. Leftover database files will not alter test results.
+---
 
-## Layout
+## Known Limitations
 
-Routes are grouped by what they act on, so nothing is a thousand-line file:
-
-```text
-app/
-  main.py          app wiring, response envelope, schema guard
-  config.py        every setting, read from .env
-  db.py            engine + session
-  models.py        SQLAlchemy tables
-  schemas.py       request/response models
-  security.py      passwords, JWT, RBAC dependencies, audit writer
-  face.py          embedding engine, liveness, organization-scoped search
-  deps.py          shared across routers: role tuples, upload limits, common queries
-  seed.py          demo tenants
-  routers/
-    auth.py        login, refresh, me
-    employees.py   roster + face profiles
-    attendance.py  recognition, records, dashboard, audit log
-    org.py         departments, branches, shifts
-migrations/        Alembic
-```
-
-## Migrations
-
-Alembic owns the schema. The app refuses to start if migrations have not been run, rather
-than creating tables behind Alembic's back and letting the two drift apart.
-
-```bash
-alembic upgrade head                              # apply
-alembic revision --autogenerate -m "add x"        # after changing models.py
-alembic downgrade -1                              # step back
-```
-
-The test suite runs `alembic upgrade head` too, so a broken migration fails the build.
-
-## What a scan means
-
-The gate is unattended, so the same person passes it several times a day. `recognize` answers one
-of three events, and only two of them write anything:
-
-| Situation | `event` | Writes |
-| --- | --- | --- |
-| No record for today | `CHECK_IN` | Creates the record, sets `PRESENT` or `LATE` |
-| Checked in less than `CHECKOUT_AFTER_MINUTES` ago | `ALREADY_PRESENT` | Nothing |
-| Checked in longer ago than that | `CHECK_OUT` | Stamps `check_out_at` |
-| Already checked out | `ALREADY_PRESENT` | Nothing |
-
-`ALREADY_PRESENT` is a normal `200`, not an error: a kiosk shows "already present since 09:05"
-rather than a red failure. It is also **not audited** — a gate scans all day, and turning those
-repeats into audit rows would bury the real events.
-
-`CHECKOUT_AFTER_MINUTES` (default `240`) is what stops someone walking past at lunchtime from
-accidentally ending their day. Lower it for short shifts.
-
+| Limitation | Status | Notes |
+| :--- | :--- | :--- |
+| Vector Similarity Computation | Implemented (In-Python) | Cosine similarity matching is executed via `numpy` dot product; native SQL `<->` pgvector queries are not used in `find_best_match`. |
+| Device Token Refresh | Implemented as Permanent | Kiosk device tokens are issued with 365-day lifespans and have no refresh flow; revocation relies on real-time database lookups. |
+| Passive Anti-Spoofing Model | Partial | Challenge liveness is implemented; passive single-frame anti-spoofing requires `ALLOW_UNCONFIGURED_PASSIVE_LIVENESS=true` unless custom weights are supplied. |
+| Face Model Weights Licensing | Note | InsightFace ArcFace models are licensed for non-commercial research use by default; commercial production deployment requires appropriate licensing or an open-weight alternative. |
+| Self-Service Password Reset | Planned | Email-based password reset endpoints are not implemented in the backend. |

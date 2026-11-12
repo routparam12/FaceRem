@@ -24,8 +24,11 @@ export interface Employee {
   employee_code: string;
   full_name: string;
   email: string;
+  phone?: string;
   department: string;
+  branch?: string;
   job_title: string;
+  shift_name?: string;
   is_active: boolean;
   face_enrolled: boolean;
   has_pin?: boolean;

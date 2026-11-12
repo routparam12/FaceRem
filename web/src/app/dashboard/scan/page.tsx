@@ -8,7 +8,9 @@ import { canRunScans } from "@/lib/types";
 
 export default async function ScanPage() {
   const me = await apiGet<Me>("/api/v1/auth/me");
-  if (!canRunScans(me.role)) redirect("/dashboard");
+  if (process.env.NEXT_PUBLIC_ENABLE_WEB_SCANNER !== "1" || !canRunScans(me.role)) {
+    redirect("/dashboard");
+  }
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">

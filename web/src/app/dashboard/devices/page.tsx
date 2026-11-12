@@ -258,8 +258,8 @@ export default function DevicesPage() {
 
       {/* 10-Minute Enrollment Code Modal */}
       {showCodeModal && enrollmentCode && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl space-y-5 text-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 backdrop-blur-xs p-4">
+          <div className="glass-panel w-full max-w-md p-6 shadow-2xl space-y-5 text-center">
             <span className="grid size-12 place-items-center rounded-full bg-brand-50 text-2xl mx-auto">
               📱
             </span>
@@ -283,7 +283,7 @@ export default function DevicesPage() {
               </p>
             </div>
 
-            <div className="rounded-lg bg-ink-50 p-3 text-left text-xs text-ink-600 space-y-1">
+            <div className="rounded-lg bg-ink-50/80 p-3 text-left text-xs text-ink-600 space-y-1">
               <p className="font-semibold text-ink-900">Security Note:</p>
               <p>• Code is single-use and invalid after 10 minutes.</p>
               <p>• Upon verification, the tablet receives a dedicated cryptographic device token.</p>
@@ -298,8 +298,8 @@ export default function DevicesPage() {
 
       {/* Edit Device Modal */}
       {editingDevice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 backdrop-blur-xs p-4">
+          <div className="glass-panel w-full max-w-md p-6 shadow-2xl">
             <h3 className="text-lg font-bold text-ink-900">Edit Kiosk Device</h3>
             <form onSubmit={handleUpdateDevice} className="mt-4 space-y-4">
               <Field
@@ -316,7 +316,7 @@ export default function DevicesPage() {
                 <select
                   value={editMode}
                   onChange={(e) => setEditMode(e.target.value as "AUTO" | "IN_ONLY" | "OUT_ONLY")}
-                  className="w-full rounded-lg border border-ink-200 bg-white px-3 py-2 text-xs font-medium text-ink-900"
+                  className="w-full rounded-lg border border-ink-200 bg-[var(--glass-input-bg)] px-3 py-2 text-xs font-medium text-ink-900"
                 >
                   <option value="AUTO">AUTO (Bi-directional toggle)</option>
                   <option value="IN_ONLY">IN_ONLY (Entrance only)</option>
@@ -344,8 +344,8 @@ export default function DevicesPage() {
 
       {/* Revoke Confirmation Modal */}
       {revokingDevice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 backdrop-blur-xs p-4">
+          <div className="glass-panel w-full max-w-md p-6 shadow-2xl space-y-4">
             <h3 className="text-lg font-bold text-rose-900">Revoke Kiosk Device?</h3>
             <p className="text-xs text-ink-600">
               Are you sure you want to revoke <strong>{revokingDevice.name}</strong>? Its API token

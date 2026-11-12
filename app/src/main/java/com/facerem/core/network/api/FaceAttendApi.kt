@@ -11,13 +11,16 @@ import com.facerem.core.network.dto.NewEmployeeDto
 import com.facerem.core.network.dto.PinVerifyRequestDto
 import com.facerem.core.network.dto.PinVerifyResponseDto
 import com.facerem.core.network.dto.RecognizeResponseDto
+import com.facerem.core.network.dto.ReportSummaryDto
 import com.facerem.core.network.dto.UndoRequestDto
 import com.facerem.core.network.dto.UndoResponseDto
+import com.facerem.core.network.dto.UpdateEmployeeDto
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.Multipart
+import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Part
 import retrofit2.http.Path
@@ -35,6 +38,15 @@ interface FaceAttendApi {
 
     @POST("api/v1/employees")
     suspend fun createEmployee(@Body body: NewEmployeeDto): ApiEnvelope<EmployeeDto>
+
+    @PATCH("api/v1/employees/{id}")
+    suspend fun updateEmployee(
+        @Path("id") id: String,
+        @Body body: UpdateEmployeeDto,
+    ): ApiEnvelope<EmployeeDto>
+
+    @GET("api/v1/reports/summary")
+    suspend fun reportSummary(): ApiEnvelope<ReportSummaryDto>
 
     @Multipart
     @POST("api/v1/employees/{id}/face/enroll")

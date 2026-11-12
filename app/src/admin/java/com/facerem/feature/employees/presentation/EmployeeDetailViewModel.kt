@@ -8,6 +8,7 @@ import com.facerem.core.common.AppResult
 import com.facerem.core.model.AttendanceRecord
 import com.facerem.core.model.Employee
 import com.facerem.feature.employees.domain.EmployeeRepository
+import com.facerem.feature.employees.domain.UpdateEmployee
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,6 +21,7 @@ data class EmployeeDetailUiState(
     val employee: Employee? = null,
     val recentAttendance: List<AttendanceRecord> = emptyList(),
     val errorMessage: String? = null,
+    val isUpdating: Boolean = false,
 )
 
 @HiltViewModel
@@ -54,6 +56,27 @@ class EmployeeDetailViewModel @Inject constructor(
 
                 is AppResult.Error -> mutableUiState.update {
                     it.copy(isLoading = false, errorMessage = result.error.userMessage)
+                }
+
+                AppResult.Loading -> Unit
+            }
+        }
+    }
+
+    fun updateEmployee(update: UpdateEmployee, onComplete: (Boolean) -> Unit = {}) {
+        mutableUiState.update { it.copy(isUpdating = true) }
+        viewModelScope.launch {
+            when (val result = employeeRepository.updateEmployee(employeeId, update)) {
+                is AppResult.Success -> {
+                    mutableUiState.update { it.copy(isUpdating = false, employee = result.data) }
+                    onComplete(true)
+                }
+
+                is AppResult.Error -> {
+                    mutableUiState.update {
+                        it.copy(isUpdating = false, errorMessage = result.error.userMessage)
+                    }
+                    onComplete(false)
                 }
 
                 AppResult.Loading -> Unit

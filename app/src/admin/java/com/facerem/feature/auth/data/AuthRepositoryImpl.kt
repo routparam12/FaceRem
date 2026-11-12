@@ -27,7 +27,8 @@ class AuthRepositoryImpl @Inject constructor(
         email: String,
         password: String,
         organizationCode: String,
-    ): AppResult<User> = remote.login(email, password, organizationCode)
+        totpCode: String?,
+    ): AppResult<User> = remote.login(email, password, organizationCode, totpCode)
 
     override suspend fun continueAsGuest(): AppResult<User> = demo.continueAsGuest()
 

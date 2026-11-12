@@ -25,12 +25,16 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.facerem.core.common.grouped
 import com.facerem.core.designsystem.component.AppTopBar
@@ -44,6 +48,12 @@ import com.facerem.core.designsystem.component.StatCard
 import com.facerem.ui.theme.AppTheme
 import com.facerem.ui.theme.Spacing
 
+import androidx.compose.material3.ExperimentalMaterial3Api
+import com.facerem.core.model.DashboardSummary
+import com.facerem.feature.dashboard.presentation.DashboardStatCategory
+import com.facerem.feature.dashboard.presentation.StatDetailModalSheet
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReportsRoute(
     onNavigateUp: () -> Unit,
@@ -52,6 +62,17 @@ fun ReportsRoute(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val semantic = AppTheme.colors
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.load()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     LaunchedEffect(uiState.exportMessage) {
         val message = uiState.exportMessage ?: return@LaunchedEffect
@@ -142,6 +163,7 @@ fun ReportsRoute(
                             value = summary.lateArrivals.toString(),
                             icon = Icons.Default.Schedule,
                             accent = semantic.warning,
+                            onClick = { viewModel.selectStatCategory(DashboardStatCategory.LATE) },
                             modifier = Modifier.weight(1f),
                         )
                         StatCard(
@@ -149,19 +171,22 @@ fun ReportsRoute(
                             value = summary.absences.toString(),
                             icon = Icons.Default.EventBusy,
                             accent = MaterialTheme.colorScheme.error,
+                            onClick = { viewModel.selectStatCategory(DashboardStatCategory.ABSENT) },
                             modifier = Modifier.weight(1f),
                         )
                     }
                 }
 
-                item { SectionHeader(title = "By department") }
+                if (summary.departmentBreakdown.isNotEmpty()) {
+                    item { SectionHeader(title = "By department") }
 
-                items(summary.departmentBreakdown, key = { it.department }) { department ->
-                    RateBar(
-                        label = department.department,
-                        rate = department.rate,
-                        caption = "${department.headCount} people",
-                    )
+                    items(summary.departmentBreakdown, key = { it.department }) { department ->
+                        RateBar(
+                            label = department.department,
+                            rate = department.rate,
+                            caption = "${department.headCount} people",
+                        )
+                    }
                 }
 
                 item {
@@ -174,6 +199,28 @@ fun ReportsRoute(
                     )
                 }
             }
+        }
+
+        uiState.selectedStatCategory?.let { category ->
+            val dashSummary = uiState.dashboardSummary ?: DashboardSummary(
+                organizationName = "",
+                dateLabel = "",
+                totalEmployees = uiState.allEmployees.size,
+                presentCount = 0,
+                lateCount = summary?.lateArrivals ?: 0,
+                absentCount = summary?.absences ?: 0,
+                onLeaveCount = 0,
+                pendingEnrollments = 0,
+                weeklyAttendanceRate = emptyList(),
+                recentActivity = emptyList(),
+            )
+            StatDetailModalSheet(
+                category = category,
+                summary = dashSummary,
+                employees = uiState.allEmployees,
+                attendanceRecords = uiState.todayAttendanceRecords,
+                onDismissRequest = { viewModel.selectStatCategory(null) },
+            )
         }
     }
 }

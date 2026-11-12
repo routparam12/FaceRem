@@ -3,11 +3,15 @@ package com.facerem.feature.dashboard.presentation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.facerem.core.common.AppResult
+import com.facerem.core.model.AttendanceRecord
 import com.facerem.core.model.DashboardSummary
+import com.facerem.core.model.Employee
 import com.facerem.core.model.User
 import com.facerem.core.session.SessionManager
 import com.facerem.core.session.SessionState
+import com.facerem.feature.attendance.domain.AttendanceRepository
 import com.facerem.feature.dashboard.domain.DashboardRepository
+import com.facerem.feature.employees.domain.EmployeeRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,12 +25,17 @@ data class DashboardUiState(
     val user: User? = null,
     val isGuest: Boolean = false,
     val summary: DashboardSummary? = null,
+    val allEmployees: List<Employee> = emptyList(),
+    val todayAttendanceRecords: List<AttendanceRecord> = emptyList(),
+    val selectedStatCategory: DashboardStatCategory? = null,
     val errorMessage: String? = null,
 )
 
 @HiltViewModel
 class DashboardViewModel @Inject constructor(
     private val dashboardRepository: DashboardRepository,
+    private val employeeRepository: EmployeeRepository,
+    private val attendanceRepository: AttendanceRepository,
     sessionManager: SessionManager,
 ) : ViewModel() {
 
@@ -47,18 +56,36 @@ class DashboardViewModel @Inject constructor(
 
     fun refresh() = load(isRefresh = true)
 
+    fun selectStatCategory(category: DashboardStatCategory?) {
+        mutableUiState.update { it.copy(selectedStatCategory = category) }
+    }
+
     private fun load(isRefresh: Boolean = false) {
         mutableUiState.update {
             it.copy(isLoading = !isRefresh && it.summary == null, isRefreshing = isRefresh, errorMessage = null)
         }
         viewModelScope.launch {
-            when (val result = dashboardRepository.loadSummary()) {
-                is AppResult.Success -> mutableUiState.update {
-                    it.copy(isLoading = false, isRefreshing = false, summary = result.data)
+            val summaryResult = dashboardRepository.loadSummary()
+            val employeesResult = employeeRepository.loadEmployees()
+            val attendanceResult = attendanceRepository.history()
+
+            when (summaryResult) {
+                is AppResult.Success -> {
+                    val employees = (employeesResult as? AppResult.Success)?.data.orEmpty()
+                    val attendance = (attendanceResult as? AppResult.Success)?.data.orEmpty()
+                    mutableUiState.update {
+                        it.copy(
+                            isLoading = false,
+                            isRefreshing = false,
+                            summary = summaryResult.data,
+                            allEmployees = employees,
+                            todayAttendanceRecords = attendance,
+                        )
+                    }
                 }
 
                 is AppResult.Error -> mutableUiState.update {
-                    it.copy(isLoading = false, isRefreshing = false, errorMessage = result.error.userMessage)
+                    it.copy(isLoading = false, isRefreshing = false, errorMessage = summaryResult.error.userMessage)
                 }
 
                 AppResult.Loading -> Unit

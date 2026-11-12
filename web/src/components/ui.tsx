@@ -14,7 +14,7 @@ export function BrandMark({ className = "size-9" }: { className?: string }) {
       className={cx(
         className,
         "inline-flex items-center justify-center rounded-[28%]",
-        "bg-gradient-to-br from-brand-600 to-violet-600 text-white",
+        "bg-gradient-to-br from-brand-600 to-violet-600 text-white shadow-xs",
       )}
     >
       <svg viewBox="0 0 36 36" fill="none" className="size-[62%]" aria-hidden="true">
@@ -49,10 +49,10 @@ export function Wordmark({ className }: { className?: string }) {
 type ButtonVariant = "primary" | "secondary" | "danger" | "ghost";
 
 const buttonStyles: Record<ButtonVariant, string> = {
-  primary: "bg-brand-600 text-white hover:bg-brand-700 disabled:bg-ink-300",
-  secondary: "border border-ink-300 bg-white text-ink-800 hover:bg-ink-50 disabled:text-ink-400",
-  danger: "border border-danger/30 bg-danger-bg text-danger-fg hover:bg-danger/15",
-  ghost: "text-ink-600 hover:bg-ink-100 hover:text-ink-900",
+  primary: "bg-brand-600 text-white shadow-xs hover:bg-brand-700 disabled:bg-ink-300",
+  secondary: "border border-ink-200/80 bg-white/70 backdrop-blur-xs text-ink-800 hover:bg-white shadow-xs disabled:text-ink-400",
+  danger: "border border-danger/30 bg-danger-bg text-danger-fg hover:bg-danger/15 shadow-xs",
+  ghost: "text-ink-600 hover:bg-white/60 hover:text-ink-900",
 };
 
 export function Button({
@@ -112,9 +112,9 @@ export function Field({
         {...props}
         aria-invalid={error ? true : undefined}
         className={cx(
-          "h-11 w-full rounded-xl border bg-white px-3.5 text-sm text-ink-900",
-          "placeholder:text-ink-400 focus:border-brand-600 focus:outline-none",
-          error ? "border-danger" : "border-ink-300",
+          "h-11 w-full rounded-xl border px-3.5 text-sm text-ink-900",
+          "bg-[var(--glass-input-bg)] placeholder:text-ink-400 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/20",
+          error ? "border-danger" : "border-ink-200/90",
         )}
       />
       {(error || hint) && (
@@ -128,7 +128,7 @@ export function Field({
 
 export function Card({ className, children }: { className?: string; children: ReactNode }) {
   return (
-    <div className={cx("rounded-2xl border border-ink-200 bg-white", className)}>{children}</div>
+    <div className={cx("glass-panel overflow-hidden", className)}>{children}</div>
   );
 }
 
@@ -160,23 +160,23 @@ export function StatCard({
   } as const;
   return (
     <Card className="p-5">
-      <p className="text-sm text-ink-500">{label}</p>
-      <p className="mt-1 text-3xl font-semibold tracking-tight text-ink-900">{value}</p>
-      {caption && <p className={cx("mt-1 text-xs font-medium", tones[tone])}>{caption}</p>}
+      <p className="text-sm font-medium text-ink-500">{label}</p>
+      <p className="mt-1 text-3xl font-bold tracking-tight text-ink-900">{value}</p>
+      {caption && <p className={cx("mt-1 text-xs font-semibold", tones[tone])}>{caption}</p>}
     </Card>
   );
 }
 
 const statusTones: Record<AttendanceStatus, string> = {
-  PRESENT: "bg-success-bg text-success-fg",
-  LATE: "bg-warning-bg text-warning-fg",
-  ABSENT: "bg-danger-bg text-danger-fg",
-  ON_LEAVE: "bg-info-bg text-info-fg",
+  PRESENT: "bg-success-bg text-success-fg border border-emerald-300/40",
+  LATE: "bg-warning-bg text-warning-fg border border-amber-300/40",
+  ABSENT: "bg-danger-bg text-danger-fg border border-rose-300/40",
+  ON_LEAVE: "bg-info-bg text-info-fg border border-sky-300/40",
 };
 
 export function Pill({ children, tone }: { children: ReactNode; tone: string }) {
   return (
-    <span className={cx("inline-block rounded-md px-2 py-0.5 text-xs font-semibold", tone)}>
+    <span className={cx("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold shadow-2xs", tone)}>
       {children}
     </span>
   );
@@ -188,7 +188,7 @@ export function StatusPill({ status }: { status: AttendanceStatus }) {
 
 export function EnrollmentPill({ enrolled }: { enrolled: boolean }) {
   return (
-    <Pill tone={enrolled ? "bg-success-bg text-success-fg" : "bg-warning-bg text-warning-fg"}>
+    <Pill tone={enrolled ? "bg-success-bg text-success-fg border border-emerald-300/40" : "bg-warning-bg text-warning-fg border border-amber-300/40"}>
       {enrolled ? "Face enrolled" : "Enrollment pending"}
     </Pill>
   );
@@ -207,7 +207,7 @@ export function Avatar({ name, className = "size-9" }: { name: string; className
       className={cx(
         className,
         "inline-flex shrink-0 items-center justify-center rounded-full",
-        "bg-brand-100 text-xs font-bold text-brand-800",
+        "bg-brand-100 text-xs font-bold text-brand-800 shadow-2xs",
       )}
     >
       {initials || "?"}
@@ -226,11 +226,11 @@ export function EmptyState({ title, body }: { title: string; body: string }) {
 
 export function Banner({ tone, children }: { tone: "warning" | "danger" | "info"; children: ReactNode }) {
   const tones = {
-    warning: "bg-warning-bg text-warning-fg",
-    danger: "bg-danger-bg text-danger-fg",
-    info: "bg-info-bg text-info-fg",
+    warning: "bg-warning-bg text-warning-fg border border-amber-300/50",
+    danger: "bg-danger-bg text-danger-fg border border-rose-300/50",
+    info: "bg-info-bg text-info-fg border border-sky-300/50",
   } as const;
-  return <div className={cx("rounded-xl px-3.5 py-2.5 text-sm", tones[tone])}>{children}</div>;
+  return <div className={cx("rounded-xl px-3.5 py-2.5 text-sm shadow-2xs", tones[tone])}>{children}</div>;
 }
 
 export function formatTime(value: string | null): string {

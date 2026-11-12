@@ -2,6 +2,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from sqlalchemy import create_engine, Engine
+from sqlalchemy.inspection import _inspects, inspect
 from sqlalchemy.orm import DeclarativeBase, Session
 
 from .config import get_settings
@@ -26,6 +27,11 @@ class _EngineProxy:
     """Proxy object so code using `app.db.engine` or `inspect(engine)` always talks to active database."""
     def __getattr__(self, name: str) -> Any:
         return getattr(get_engine(), name)
+
+
+@_inspects(_EngineProxy)
+def _inspect_engine_proxy(target: _EngineProxy):
+    return inspect(get_engine())
 
 
 engine = _EngineProxy()

@@ -1,290 +1,92 @@
-# FaceAttend
+# FaceAttend (FaceRem)
 
-FaceAttend is a production-oriented, multi-tenant SaaS facial-attendance platform. The Android client is written in Kotlin and is designed for companies, colleges, schools, institutes, offices, factories, and multi-branch organizations.
+FaceAttend is a multi-tenant facial attendance platform designed for enterprises, educational institutions, factories, and multi-branch organizations.
 
-The product name and branding must remain configurable; business logic must not depend on FaceAttend-specific strings.
+> **Note on Naming**: The repository is named `FaceRem`. The product branding is configurable via environment settings and UI constants, defaulting to **FaceAttend**.
 
-The Phase 0 implementation blueprint is maintained in [docs/PHASE_0_ARCHITECTURE.md](docs/PHASE_0_ARCHITECTURE.md).
-The application shell, authentication and product screens are described in
-[docs/PHASE_2_APP_SHELL.md](docs/PHASE_2_APP_SHELL.md).
+---
 
-Deployment, the database schema, and what is not production-ready yet are in
-[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+## Architecture Model: Kiosk-First
 
-## Repository layout
+FaceAttend operates on a **kiosk-first** operational model:
+- **Administrative Staff** (`ORGANIZATION_ADMIN`, `HR_ADMIN`, `MANAGER`): Sign in to the Next.js web console or Android Admin app with email, password, and optional TOTP 2FA to manage employees, view audit logs, assign shifts, and enroll employee face profiles.
+- **Employees**: Do not sign in to administrative apps. Employees **check in** and **check out** by presenting their face to registered, locked tablet kiosks running the Android Kiosk flavor. A PIN fallback is available if biometrics cannot be evaluated.
 
-```text
-app/        Android client (Kotlin, Compose, Material 3) — see docs/PHASE_2_APP_SHELL.md
-backend/    FastAPI service (RBAC, face recognition, audit) — see backend/README.md
-web/        Next.js console and landing page — see web/README.md
-docs/       Architecture and phase documents
-```
+---
 
-Run the backend on `:8000` and the web console on `:3000`; both share the demo tenants seeded by
-`backend/app/seed.py`.
+## Implementation Status
 
-## Guest mode
+| Component / Feature | Status | Details |
+| :--- | :--- | :--- |
+| **Backend API Service** | `Implemented` | FastAPI, PostgreSQL/SQLite, pgvector, Redis, JWT auth, TOTP 2FA. |
+| **Web Admin Console** | `Implemented` | Next.js 16, React 19, BFF secure cookie proxy, dashboard, employee & device management. |
+| **Android Kiosk App** | `Implemented` | Dedicated kiosk flavor, CameraX, ML Kit face detection, interactive liveness, attendance sync. |
+| **Android Admin App** | `Implemented` | Dedicated admin flavor, dashboard, employee directory, 3-pose face enrollment, reports. |
+| **Biometric Engine** | `Implemented` | Multi-pose ArcFace 512-d embeddings via InsightFace, cosine distance search, quality evaluator. |
+| **Audit & Privacy** | `Implemented` | Tamper-evident audit logs, encrypted 7-day scan snapshot retention with auto-purge. |
+| **Offline Room Sync** | `Planned` | Local SQLite/Room caching and background WorkManager queue for offline kiosk check-ins. |
+| **Kiosk LockTask Pinning**| `Planned` | Android DPC / LockTask mode integration to lock kiosk hardware. |
+| **Shifts & Leave Web UI**| `Planned` | Dedicated web pages for managing custom work shifts, holidays, and leave requests. |
 
-The Login screen offers **Continue as guest**: a local, backend-free session seeded with a sample
-organization, so the full product can be reviewed and tested before the API exists. Guest sessions
-never contact a server, are labelled with a persistent banner on every data screen, and are cleared
-on exit. See the Phase 2 document for what guest mode does and does not cover.
+---
 
-## Product principles
-
-- Treat biometric information as sensitive data and design for privacy, consent, auditing, and deletion.
-- Enforce organization isolation on the server. A client-provided `organizationId` is never sufficient authorization.
-- Use ML Kit only for on-device face detection and quality signals; recognition is performed by the backend using InsightFace/ArcFace embeddings.
-- Build the product in explicit phases. Do not begin a later phase until it is requested.
-- Keep UI, domain, and data concerns separate. Compose screens must not call Retrofit directly or contain business logic.
-
-## Platform architecture
+## Repository Structure
 
 ```text
-Android application
-        |
-        v
-FastAPI backend
-   |       |       \
-   v       v        v
-PostgreSQL Redis  Face engine
-+ pgvector         (InsightFace / ArcFace)
+FaceRem/
+├── app/                  # Android client (Kotlin, Jetpack Compose, CameraX, ML Kit)
+│   ├── src/admin/        # Admin flavor (management, face enrollment)
+│   ├── src/kiosk/        # Kiosk flavor (attendance scanner, PIN fallback)
+│   └── src/main/         # Shared architecture, network, domain, and FaceCaptureSource
+├── backend/              # FastAPI backend service (Python 3.11, SQLAlchemy 2.0, pgvector)
+│   ├── app/              # API routers, services, models, repositories, and security
+│   ├── migrations/       # Alembic database migrations
+│   └── scripts/          # Database seeding and OpenAPI documentation generators
+├── web/                  # Next.js 16 administration console (App Router, Tailwind CSS, BFF proxy)
+└── docs/                 # Platform blueprints, API contracts, and roadmap
+    ├── API.md            # Generated OpenAPI reference (100+ endpoints)
+    ├── ARCHITECTURE.md   # System architecture blueprint and data models
+    ├── FACE_PIPELINE.md  # Detailed face recognition pipeline and thresholds
+    └── ROADMAP.md        # Verified pending features and production milestones
 ```
 
-### Android
+---
 
-The Android application uses Kotlin, Jetpack Compose, Material 3, Clean Architecture, MVVM, StateFlow, Coroutines, Hilt, CameraX, ML Kit Face Detection, Retrofit, OkHttp, Kotlin Serialization, Room, DataStore, WorkManager, Navigation Compose, and Coil where needed. It uses Gradle Kotlin DSL and version catalogs, with `minSdk = 23` and current mutually compatible stable Android dependencies.
+## Local Quick Start (5 Commands)
 
-Preferred boundaries:
-
-```text
-UI -> ViewModel -> Use case -> Repository interface -> Repository implementation -> Remote / local data source
+### 1. Set Up and Run Backend
+```bash
+cd backend
+python -m venv .venv && .venv/Scripts/activate
+pip install -r requirements.txt
+alembic upgrade head
+python -m app.seed
+uvicorn app.main:app --reload --port 8000
 ```
 
-Suggested Android structure:
+### 2. Run Web Console
+```bash
+cd web
+npm install
+npm run dev
+```
+*Open [http://localhost:3000](http://localhost:3000) and sign in using `admin@demo.com` / `Demo@123456`.*
 
-```text
-app/
-core/
-  common/
-  network/
-  database/
-  datastore/
-  designsystem/
-  model/
-feature/
-  auth/
-  dashboard/
-  employees/
-  faceenrollment/
-  attendance/
-  history/
-  reports/
-  settings/
-build-logic/
+### 3. Build Android Apps
+```bash
+cd app
+./gradlew assembleAdminDebug    # Produces app/build/outputs/apk/admin/debug/app-admin-debug.apk
+./gradlew assembleKioskDebug    # Produces app/build/outputs/apk/kiosk/debug/app-kiosk-debug.apk
 ```
 
-An initially package-based monolith is acceptable when the module layout would add premature overhead, provided the above boundaries are preserved for later modularization.
+---
 
-### Backend
+## Documentation Links
 
-The cloud-ready backend targets Microsoft Azure and uses Python, FastAPI, SQLAlchemy, Alembic, PostgreSQL with pgvector, Redis, Pydantic, JWT access/refresh tokens, InsightFace, and ArcFace.
-
-```text
-backend/
-  app/
-    api/v1/
-    core/                 # configuration, security, exceptions
-    models/
-    schemas/
-    repositories/
-    services/
-      auth/
-      attendance/
-      face/
-      liveness/
-    db/
-    main.py
-  migrations/
-  tests/
-  Dockerfile
-  docker-compose.yml
-  requirements/
-```
-
-Backend responses use a predictable envelope with machine-readable error codes:
-
-```json
-{
-  "success": true,
-  "data": {},
-  "message": "Operation successful"
-}
-```
-
-```json
-{
-  "success": false,
-  "error": {
-    "code": "FACE_NOT_RECOGNIZED",
-    "message": "Face could not be recognized."
-  }
-}
-```
-
-## Multi-tenancy and authorization
-
-Every tenant-owned record has organization ownership, normally through `organization_id`. Tenant access is derived from the authenticated user or device session and validated on every server-side operation. Face searches must always be filtered to the authorized organization before vector similarity matching.
-
-Initial roles:
-
-```text
-SUPER_ADMIN
-ORGANIZATION_ADMIN
-HR_ADMIN
-MANAGER
-EMPLOYEE
-ATTENDANCE_DEVICE
-```
-
-Role-based access control must be extensible. Organization-facing navigation must never expose `SUPER_ADMIN` functionality.
-
-## Face enrollment and recognition
-
-### Enrollment
-
-```text
-Employee -> permission -> front camera -> ML Kit detection -> quality checks
-         -> capture selected valid frames -> secure multipart upload
-         -> backend detection/alignment/validation -> ArcFace embedding -> pgvector storage
-```
-
-The client uses CameraX `Preview` and `ImageAnalysis` with a latest-frame backpressure strategy. It does not upload every camera frame. Enrollment captures multiple high-quality views (front, slight left, slight right).
-
-The quality evaluator returns statuses such as `VALID`, `NO_FACE`, `MULTIPLE_FACES`, `TOO_FAR`, `TOO_CLOSE`, `LOOK_STRAIGHT`, `TOO_DARK`, and `BLURRY`. It considers face size, position, pose, brightness, blur, frame boundaries, and face count.
-
-### Recognition and attendance
-
-```text
-CameraX -> ML Kit detects a stable face -> quality validation -> optional liveness
-        -> capture one image -> authenticated API request -> organization-scoped vector search
-        -> confidence check -> attendance-rule evaluation -> result and cooldown
-```
-
-Recognition never searches face embeddings globally and never guesses an identity below the configured confidence threshold. Duplicate scans are prevented by a configurable backend cooldown. Unknown users receive a generic “Face Not Recognized” response without exposing near matches.
-
-Liveness is a separate `LivenessService` abstraction. The initial MVP may use randomized challenge-based checks (blink, look left/right, smile), while preserving the ability to introduce a dedicated passive anti-spoofing service later. Basic eye-open detection alone is not enterprise-grade anti-spoofing.
-
-## Privacy and security
-
-- HTTPS-only API communication, secure token storage, JWT access tokens, refresh-token rotation, and logout/session invalidation.
-- RBAC, tenant isolation, server-side request validation, rate limits, upload validation, audit logs, and redacted sensitive logs.
-- Never log passwords, access or refresh tokens, raw biometric embeddings, or unnecessary personal data.
-- Support face-enrollment consent, consent timestamps, re-enrollment, face-profile removal, retention policies, and organization offboarding.
-- Removing a face profile must not delete attendance history.
-- Device identity alone is not a trust boundary; use server-side device registration and revocable device credentials.
-
-## Core data model
-
-Planned tables:
-
-```text
-organizations
-users
-roles
-employees
-departments
-branches
-shifts
-face_profiles
-attendance_records
-attendance_devices
-holidays
-leave_requests
-audit_logs
-refresh_tokens
-subscriptions
-```
-
-Key fields and indexes include `organization_id`, `employee_id`, `date`, `employee_code`, and `status`. `face_profiles` stores normalized embeddings in pgvector-compatible storage—not arbitrary JSON—and records `model_name`, `model_version`, quality score, and lifecycle timestamps to support model migrations.
-
-Attendance records support `CHECK_IN` and `CHECK_OUT` now, with room for `BREAK_START` and `BREAK_END`. The backend calculates shifts, grace periods, late time, overtime, status, and organization-specific attendance rules.
-
-## Initial API surface
-
-```text
-POST /api/v1/auth/login
-POST /api/v1/auth/refresh
-POST /api/v1/auth/logout
-POST /api/v1/auth/forgot-password
-POST /api/v1/auth/reset-password
-GET  /api/v1/auth/me
-
-GET  /api/v1/dashboard
-
-GET    /api/v1/employees
-GET    /api/v1/employees/{id}
-POST   /api/v1/employees
-PUT    /api/v1/employees/{id}
-DELETE /api/v1/employees/{id}       # generally soft delete
-
-POST /api/v1/employees/{employeeId}/face/enroll
-POST /api/v1/attendance/recognize
-```
-
-Each feature is contract-first: define request and response schemas, error cases, Android DTOs, domain models, and repository interfaces before building UI.
-
-Representative error codes include:
-
-```text
-INVALID_CREDENTIALS, TOKEN_EXPIRED, UNAUTHORIZED, FORBIDDEN,
-EMPLOYEE_NOT_FOUND, FACE_NOT_FOUND, FACE_NOT_RECOGNIZED,
-MULTIPLE_FACES, FACE_QUALITY_LOW, LIVENESS_FAILED,
-ATTENDANCE_ALREADY_MARKED, DEVICE_NOT_AUTHORIZED,
-ORGANIZATION_SUSPENDED, NETWORK_ERROR
-```
-
-## MVP scope and sequence
-
-The first production MVP includes authentication, tenant architecture, dashboard, employee management, face enrollment, camera face detection, backend face recognition, check-in/check-out, attendance history, basic shift management, basic reporting, security, and audit logging.
-
-Development phases:
-
-1. Architecture and planning
-2. Android foundation
-3. Authentication
-4. Organization and tenant foundation
-5. Dashboard
-6. Employee management
-7. Face enrollment
-8. Face AI backend
-9. Attendance scanner
-10. Liveness / anti-spoofing
-11. Attendance rules
-12. Shifts, departments, and branches
-13. History
-14. Reporting
-15. Offline and poor-network support
-16. Device registration
-17. Security and privacy
-18. Audit log
-19. Settings
-20. Testing and performance optimization
-21. UX polish
-22. Release preparation
-
-Future work—such as payroll, geofencing, push/email/WhatsApp notifications, billing, iOS, web dashboard, advanced passive liveness, and visitor management—is deliberately outside the MVP.
-
-## Offline strategy
-
-Room caches the current user, basic organization details, appropriate employee summaries, recent attendance, and safe pending operations. WorkManager synchronizes non-sensitive queued actions. Facial verification remains server-backed in the initial version; if unavailable, the application clearly communicates that internet connectivity is required rather than silently recording authoritative attendance offline.
-
-## Testing and release requirements
-
-Test ViewModels, use cases, repositories, validators, and attendance calculations; API authentication, refresh, authorization, face enrollment, attendance, and duplicate prevention; and essential Android UI flows. Include explicit tenant-isolation tests proving that an administrator from Organization A receives `403` or `404` when accessing Organization B’s employees, attendance, reports, face profiles, devices, departments, branches, or similar resources.
-
-Before release, provide environment-specific DEV/STAGING/PRODUCTION configuration, secure API endpoints, R8/ProGuard configuration, signing documentation, crash-reporting and logging abstractions, and Play Store readiness. Production credentials must never be embedded in the APK.
-
-## Delivery rule
-
-Implement only the phase explicitly requested. At the end of each phase, build the project, correct compilation and import/dependency issues, run relevant tests, document changed files and the current project tree, state what remains, and stop for approval before the next phase.
+- **Web Console Details**: [web/README.md](web/README.md)
+- **Backend Service & Database**: [backend/README.md](backend/README.md)
+- **Android App & Flavors**: [app/README.md](app/README.md)
+- **Architecture & Schema Blueprint**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- **API Documentation**: [docs/API.md](docs/API.md)
+- **Product Roadmap**: [docs/ROADMAP.md](docs/ROADMAP.md)
+- **Contributor & Agent Rules**: [AGENTS.md](AGENTS.md)

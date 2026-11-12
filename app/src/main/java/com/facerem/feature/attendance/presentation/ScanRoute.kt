@@ -26,6 +26,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -63,6 +64,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -125,25 +127,41 @@ fun ScanRoute(
         return
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        val density = LocalDensity.current
+        val viewWidth = with(density) { maxWidth.toPx() }
+        val viewHeight = with(density) { maxHeight.toPx() }
+
         // Camera live feed
         FaceCameraPreview(
             detector = detector,
             pose = FaceQualityEvaluator.HeadPose.FRONT,
             onQuality = { status -> viewModel.onQuality(status, captureController::capture) },
+            onFacesDetected = { faces, imgW, imgH ->
+                viewModel.onFacesDetected(faces, imgW, imgH, viewWidth, viewHeight, captureController::capture)
+            },
             modifier = Modifier.fillMaxSize(),
             captureController = captureController,
         )
 
-        // Spring-animated camera reticle overlay
-        FaceFramingOverlay(
-            accent = when {
-                uiState.phase != ScanPhase.SCANNING -> AppTheme.colors.info
-                uiState.quality.isValid -> AppTheme.colors.success
-                else -> AppTheme.colors.warning
-            },
-            isActive = uiState.phase == ScanPhase.SCANNING,
+        // Dynamic multi-face track overlay with smooth animation and state badges
+        KioskFaceTrackOverlay(
+            tracks = uiState.trackedFaces,
+            onUsePinClicked = viewModel::openPinDialog,
+            modifier = Modifier.fillMaxSize(),
         )
+
+        // Spring-animated camera reticle overlay (shown as guide when no tracked face is detected)
+        if (uiState.trackedFaces.isEmpty()) {
+            FaceFramingOverlay(
+                accent = when {
+                    uiState.phase != ScanPhase.SCANNING -> AppTheme.colors.info
+                    uiState.quality.isValid -> AppTheme.colors.success
+                    else -> AppTheme.colors.warning
+                },
+                isActive = uiState.phase == ScanPhase.SCANNING,
+            )
+        }
 
         // Glassmorphism HUD Header
         KioskHeader(
@@ -182,9 +200,9 @@ fun ScanRoute(
             )
         }
 
-        // Bouncy spring result card overlay
+        // Bouncy spring result card overlay (fallback if no track overlay present)
         AnimatedVisibility(
-            visible = uiState.phase == ScanPhase.RESULT,
+            visible = uiState.phase == ScanPhase.RESULT && uiState.trackedFaces.isEmpty(),
             enter = fadeIn(tween(250)) +
                 scaleIn(
                     initialScale = 0.85f,
@@ -210,9 +228,9 @@ fun ScanRoute(
             )
         }
 
-        // Animated radar wave verifying overlay with challenge action prompt
+        // Animated radar wave verifying overlay with challenge action prompt (fallback if no track overlay)
         AnimatedVisibility(
-            visible = uiState.phase == ScanPhase.VERIFYING,
+            visible = uiState.phase == ScanPhase.VERIFYING && uiState.trackedFaces.isEmpty(),
             enter = fadeIn(tween(200)),
             exit = fadeOut(tween(200)),
         ) {

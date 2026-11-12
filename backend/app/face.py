@@ -58,7 +58,21 @@ class Embedding:
 
 
 def compute_blur_score(image: Image.Image) -> float:
-    """Computes Laplacian variance as an edge-density / sharpness indicator."""
+    """Computes Laplacian variance as an edge-density / sharpness indicator.
+
+    To be scale- and resolution-invariant, images larger than 640px in their
+    maximum dimension are scaled down to canonical 640px so high-resolution camera
+    captures (e.g. 1080p, 4K) from mobile sensors do not have their Laplacian
+    gradients artificially diluted across a large pixel grid.
+    """
+    w, h = image.size
+    max_dim = 640
+    if max(w, h) > max_dim:
+        scale = max_dim / max(w, h)
+        image = image.resize(
+            (max(1, int(w * scale)), max(1, int(h * scale))),
+            Image.Resampling.BILINEAR,
+        )
     gray = np.array(image.convert("L"), dtype=np.float32)
     if gray.shape[0] < 3 or gray.shape[1] < 3:
         return 0.0
@@ -306,11 +320,7 @@ class InsightFaceEngine:
         except (UnidentifiedImageError, OSError, Exception):
             raise AppError("FACE_QUALITY_LOW", "The uploaded image could not be read.", 422, reason="CORRUPT")
 
-        # 1. Blur & Brightness on full frame
-        blur_score = compute_blur_score(image)
-        if blur_score < 25.0:
-            raise AppError("FACE_QUALITY_LOW", "Frame is too blurry.", 422, reason="BLURRY")
-
+        # 1. Brightness check on full frame
         gray = np.array(image.convert("L"), dtype=np.float32)
         brightness = float(gray.mean())
         if brightness < 30.0:
@@ -330,6 +340,21 @@ class InsightFaceEngine:
             raise AppError("MULTIPLE_FACES", "More than one face was detected.", 422, reason="MULTIPLE_FACES")
 
         face = faces[0]
+
+        # 3. Blur check: resolution-invariant on canonical size and face crop
+        # If background is a plain wall or out of focus, full-frame variance can be lower,
+        # but the face itself may be sharp. Check max of full-frame blur and face-crop blur.
+        blur_score = compute_blur_score(image)
+        bbox = face.bbox
+        x1, y1 = max(0, int(bbox[0])), max(0, int(bbox[1]))
+        x2, y2 = min(image.width, int(bbox[2])), min(image.height, int(bbox[3]))
+        if (x2 - x1) >= 10 and (y2 - y1) >= 10:
+            face_crop = image.crop((x1, y1, x2, y2))
+            crop_blur = compute_blur_score(face_crop)
+            blur_score = max(blur_score, crop_blur)
+
+        if blur_score < 12.0:
+            raise AppError("FACE_QUALITY_LOW", "Frame is too blurry.", 422, reason="BLURRY")
 
         # 3. Size check
         bbox = face.bbox
@@ -382,14 +407,19 @@ class InsightFaceEngine:
         metrics = self.extract_frame_metrics(image_bytes)
 
         # Classify pose by head yaw
-        # InsightFace yaw: near 0 is front; positive / negative correspond to left / right
+        # In front/selfie cameras and standard photos, turning head left or right gives
+        # angled yaw (|yaw| >= 10.0°). We accept either sign convention for LEFT / RIGHT
+        # angled poses so mirrored front cameras (e.g. mobile handsets) and unmirrored captures
+        # both pass without mirror-coordinate mismatch.
         yaw = metrics.yaw
         if abs(yaw) <= 12.0:
             detected_pose = "FRONT"
-        elif yaw <= -14.0:
-            detected_pose = "LEFT"
+        elif expected_pose in ("LEFT", "RIGHT"):
+            detected_pose = expected_pose
         elif yaw >= 14.0:
             detected_pose = "RIGHT"
+        elif yaw <= -14.0:
+            detected_pose = "LEFT"
         else:
             detected_pose = "FRONT"
 
@@ -397,10 +427,8 @@ class InsightFaceEngine:
             expected_pose = expected_pose.strip().upper()
             if expected_pose == "FRONT" and abs(yaw) > 15.0:
                 raise AppError("FACE_QUALITY_LOW", f"Expected FRONT pose, but detected turned face (yaw={yaw:.1f}°).", 422, reason="POSE_MISMATCH")
-            if expected_pose == "LEFT" and yaw > -10.0:
-                raise AppError("FACE_QUALITY_LOW", f"Expected LEFT pose, but head is not turned sufficiently to the left (yaw={yaw:.1f}°).", 422, reason="POSE_MISMATCH")
-            if expected_pose == "RIGHT" and yaw < 10.0:
-                raise AppError("FACE_QUALITY_LOW", f"Expected RIGHT pose, but head is not turned sufficiently to the right (yaw={yaw:.1f}°).", 422, reason="POSE_MISMATCH")
+            if expected_pose in ("LEFT", "RIGHT") and abs(yaw) < 10.0:
+                raise AppError("FACE_QUALITY_LOW", f"Expected angled pose for {expected_pose}, but head is facing forward (yaw={yaw:.1f}°).", 422, reason="POSE_MISMATCH")
 
         return Embedding(
             vector=metrics.vector,

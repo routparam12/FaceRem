@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..attendance_service import (
     confirm_provisional_event,
+    get_org_timezone,
     process_face_observation,
     process_pin_attendance,
     undo_last_event,
@@ -61,6 +62,7 @@ from ..security import (
     tenant_scope,
     verify_password,
 )
+from ..storage import save_scan_photo
 
 router = APIRouter()
 
@@ -183,6 +185,17 @@ async def recognize(
         observation=observation,
         principal=principal,
     )
+
+    if result.employee_id:
+        try:
+            save_scan_photo(
+                organization_id=organization_id,
+                employee_id=result.employee_id,
+                image_bytes=image_bytes,
+                event_id=result.event_id or str(uuid.uuid4()),
+            )
+        except Exception:
+            pass
 
     return RecognizeResponse(
         employee_id=result.employee_id,
@@ -524,7 +537,8 @@ def dashboard(
 ) -> DashboardResponse:
     organization_id = principal.organization_id
     organization = db.get(Organization, organization_id)
-    today = datetime.now(timezone.utc).date()
+    org_tz = get_org_timezone(organization)
+    today = datetime.now(org_tz).date()
 
     emp_query = select(Employee).where(
         Employee.organization_id == organization_id,
@@ -549,7 +563,8 @@ def dashboard(
         records_query = records_query.where(False)
 
     records = db.scalars(records_query).all()
-    present = sum(1 for r in records if r.status is AttendanceStatus.PRESENT)
+    # Late arrivals are present (they came, even though late)
+    present = sum(1 for r in records if r.status in (AttendanceStatus.PRESENT, AttendanceStatus.LATE))
     late = sum(1 for r in records if r.status is AttendanceStatus.LATE)
     enrolled = enrolled_ids(db, organization_id)
     scoped_enrolled = len(scoped_emp_ids.intersection(enrolled))

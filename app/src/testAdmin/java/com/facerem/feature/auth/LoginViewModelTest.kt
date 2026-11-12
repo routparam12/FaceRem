@@ -114,17 +114,138 @@ class LoginViewModelTest {
         assertTrue(state.password.length >= 8)
     }
 
+    @Test
+    fun `totp_required error transitions state to isTotpRequired true`() = runTest {
+        fakeRepository.loginResult = AppResult.Error(
+            AppError.Api("TOTP_REQUIRED", "Enter the 6-digit verification code or recovery code.", httpStatus = 200),
+        )
+        val viewModel = LoginViewModel(fakeRepository)
+        viewModel.onEmailChange("admin@northwind.demo")
+        viewModel.onPasswordChange("demo12345")
+
+        viewModel.signIn()
+
+        val state = viewModel.uiState.value
+        assertTrue(state.isTotpRequired)
+        assertFalse(state.authenticated)
+        assertFalse(state.isSubmitting)
+        assertNull(state.formError)
+    }
+
+    @Test
+    fun `submitting totp code calls login with totpCode and authenticates`() = runTest {
+        fakeRepository.loginResult = AppResult.Error(
+            AppError.Api("TOTP_REQUIRED", "Enter the 6-digit verification code.", httpStatus = 200),
+        )
+        val viewModel = LoginViewModel(fakeRepository)
+        viewModel.onEmailChange("admin@northwind.demo")
+        viewModel.onPasswordChange("demo12345")
+        viewModel.signIn()
+        assertTrue(viewModel.uiState.value.isTotpRequired)
+
+        // Now provide TOTP and successful verification
+        fakeRepository.loginResult = AppResult.Success(FakeAuthRepository.ADMIN)
+        viewModel.onTotpCodeChange("123456")
+        assertTrue(viewModel.uiState.value.canSubmit)
+
+        viewModel.signIn()
+
+        val state = viewModel.uiState.value
+        assertTrue(state.authenticated)
+        assertEquals("123456", fakeRepository.lastTotpCode)
+        assertEquals(2, fakeRepository.loginCallCount)
+    }
+
+    @Test
+    fun `blank totp code when 2FA required displays validation error`() = runTest {
+        fakeRepository.loginResult = AppResult.Error(
+            AppError.Api("TOTP_REQUIRED", "Enter verification code.", httpStatus = 200),
+        )
+        val viewModel = LoginViewModel(fakeRepository)
+        viewModel.onEmailChange("admin@northwind.demo")
+        viewModel.onPasswordChange("demo12345")
+        viewModel.signIn()
+
+        // Submit without typing code
+        viewModel.signIn()
+
+        assertNotNull(viewModel.uiState.value.totpError)
+        assertEquals(1, fakeRepository.loginCallCount)
+    }
+
+    @Test
+    fun `totp_setup_required surfaces clear message about web console`() = runTest {
+        fakeRepository.loginResult = AppResult.Error(
+            AppError.Api(
+                "TOTP_SETUP_REQUIRED",
+                "Two-factor authentication (2FA) must be set up in the web console first. 2FA setup is not supported on mobile.",
+                httpStatus = 403,
+            ),
+        )
+        val viewModel = LoginViewModel(fakeRepository)
+        viewModel.onEmailChange("admin@northwind.demo")
+        viewModel.onPasswordChange("demo12345")
+
+        viewModel.signIn()
+
+        val state = viewModel.uiState.value
+        assertFalse(state.isTotpRequired)
+        assertFalse(state.authenticated)
+        assertEquals(
+            "Two-factor authentication (2FA) must be set up in the web console first. 2FA setup is not supported on mobile.",
+            state.formError,
+        )
+    }
+
+    @Test
+    fun `attendance device or employee role rejection displays clear error`() = runTest {
+        fakeRepository.loginResult = AppResult.Error(
+            AppError.Api("ROLE_NOT_ALLOWED", "Access denied: Attendance device is not allowed in this app.", httpStatus = 403),
+        )
+        val viewModel = LoginViewModel(fakeRepository)
+        viewModel.onEmailChange("device@northwind.demo")
+        viewModel.onPasswordChange("demo12345")
+
+        viewModel.signIn()
+
+        val state = viewModel.uiState.value
+        assertEquals("Access denied: Attendance device is not allowed in this app.", state.formError)
+        assertFalse(state.authenticated)
+    }
+
+    @Test
+    fun `resetTotpPrompt returns state to credentials form`() = runTest {
+        fakeRepository.loginResult = AppResult.Error(
+            AppError.Api("TOTP_REQUIRED", "2FA required", httpStatus = 200),
+        )
+        val viewModel = LoginViewModel(fakeRepository)
+        viewModel.onEmailChange("admin@northwind.demo")
+        viewModel.onPasswordChange("demo12345")
+        viewModel.signIn()
+        assertTrue(viewModel.uiState.value.isTotpRequired)
+
+        viewModel.resetTotpPrompt()
+
+        val state = viewModel.uiState.value
+        assertFalse(state.isTotpRequired)
+        assertEquals("", state.totpCode)
+        assertNull(state.totpError)
+    }
+
     private class FakeAuthRepository : AuthRepository {
         var loginCallCount = 0
         var guestCallCount = 0
+        var lastTotpCode: String? = null
         var loginResult: AppResult<User> = AppResult.Success(ADMIN)
 
         override suspend fun login(
             email: String,
             password: String,
             organizationCode: String,
+            totpCode: String?,
         ): AppResult<User> {
             loginCallCount++
+            lastTotpCode = totpCode
             return loginResult
         }
 

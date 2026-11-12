@@ -232,15 +232,12 @@ class DemoDataStore @Inject constructor() {
 
     fun reportSummary(): ReportSummary = ReportSummary(
         periodLabel = AppClock.currentMonthLabel(),
-        averageAttendanceRate = 0.91f,
-        totalWorkedHours = 7_412,
-        totalOvertimeHours = 286,
-        lateArrivals = 63,
-        absences = 21,
-        departmentBreakdown = departments.map { department ->
-            val seed = abs(department.name.hashCode()) % 12
-            DepartmentRate(department.name, (0.85f + seed / 100f).coerceAtMost(0.99f), department.headCount)
-        },
+        averageAttendanceRate = 0f,
+        totalWorkedHours = 0,
+        totalOvertimeHours = 0,
+        lateArrivals = 0,
+        absences = 0,
+        departmentBreakdown = emptyList(),
     )
 
     private fun seedEmployees(): List<Employee> {

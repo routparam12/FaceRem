@@ -20,8 +20,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.EventBusy
+import androidx.compose.material.icons.filled.FaceRetouchingNatural
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.HowToReg
 import androidx.compose.material.icons.filled.InsertChart
@@ -30,12 +30,14 @@ import androidx.compose.material.icons.filled.PersonAddAlt
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,6 +46,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.facerem.app.navigation.BottomBarClearance
 import com.facerem.core.common.AppClock
@@ -62,9 +67,10 @@ import com.facerem.core.model.DashboardSummary
 import com.facerem.ui.theme.AppTheme
 import com.facerem.ui.theme.Spacing
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardRoute(
-    onOpenScan: () -> Unit,
+    onEnrollFace: () -> Unit,
     onOpenEmployees: () -> Unit,
     onOpenHistory: () -> Unit,
     onOpenReports: () -> Unit,
@@ -73,6 +79,19 @@ fun DashboardRoute(
     viewModel: DashboardViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refresh()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -86,8 +105,9 @@ fun DashboardRoute(
     ) { padding ->
         when {
             uiState.isLoading -> FullScreenLoader(
-                message = "Loading today's attendance…",
-                modifier = Modifier.padding(padding),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
             )
 
             uiState.summary == null -> ErrorState(
@@ -99,15 +119,33 @@ fun DashboardRoute(
                     .padding(padding),
             )
 
-            else -> DashboardContent(
-                contentPadding = padding,
-                summary = requireNotNull(uiState.summary),
-                isGuest = uiState.isGuest,
-                onOpenScan = onOpenScan,
-                onOpenEmployees = onOpenEmployees,
-                onOpenHistory = onOpenHistory,
-                onOpenReports = onOpenReports,
-            )
+            else -> {
+                DashboardContent(
+                    contentPadding = padding,
+                    summary = requireNotNull(uiState.summary),
+                    isGuest = uiState.isGuest,
+                    canEnrollFaces = uiState.user?.role?.canEnrollFaces == true,
+                    onEnrollFace = onEnrollFace,
+                    onOpenEmployees = onOpenEmployees,
+                    onOpenHistory = onOpenHistory,
+                    onOpenReports = onOpenReports,
+                    onStatClick = viewModel::selectStatCategory,
+                )
+
+                uiState.selectedStatCategory?.let { category ->
+                    StatDetailModalSheet(
+                        category = category,
+                        summary = requireNotNull(uiState.summary),
+                        employees = uiState.allEmployees,
+                        attendanceRecords = uiState.todayAttendanceRecords,
+                        onDismissRequest = { viewModel.selectStatCategory(null) },
+                        onEmployeeClick = { _ ->
+                            viewModel.selectStatCategory(null)
+                            onOpenEmployees()
+                        },
+                    )
+                }
+            }
         }
     }
 }
@@ -128,18 +166,11 @@ private fun DashboardHeader(
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                greeting(),
+                "${greeting()},",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontWeight = FontWeight.Medium,
             )
-            Text(
-                name.ifBlank { "There" },
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Text(name.ifBlank { "Workspace" }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             if (organization.isNotBlank()) {
                 Spacer(Modifier.height(Spacing.xs))
                 Text(
@@ -171,10 +202,12 @@ private fun DashboardContent(
     contentPadding: PaddingValues,
     summary: DashboardSummary,
     isGuest: Boolean,
-    onOpenScan: () -> Unit,
+    canEnrollFaces: Boolean,
+    onEnrollFace: () -> Unit,
     onOpenEmployees: () -> Unit,
     onOpenHistory: () -> Unit,
     onOpenReports: () -> Unit,
+    onStatClick: (DashboardStatCategory) -> Unit,
 ) {
     val semantic = AppTheme.colors
 
@@ -210,6 +243,7 @@ private fun DashboardContent(
                     icon = Icons.Default.HowToReg,
                     accent = semantic.success,
                     caption = "of ${summary.totalEmployees} employees",
+                    onClick = { onStatClick(DashboardStatCategory.PRESENT) },
                     modifier = Modifier.weight(1f),
                 )
                 StatCard(
@@ -217,6 +251,7 @@ private fun DashboardContent(
                     value = summary.lateCount.toString(),
                     icon = Icons.Default.Schedule,
                     accent = semantic.warning,
+                    onClick = { onStatClick(DashboardStatCategory.LATE) },
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -230,6 +265,7 @@ private fun DashboardContent(
                     icon = Icons.Default.EventBusy,
                     accent = MaterialTheme.colorScheme.error,
                     caption = "${summary.onLeaveCount} on approved leave",
+                    onClick = { onStatClick(DashboardStatCategory.ABSENT) },
                     modifier = Modifier.weight(1f),
                 )
                 StatCard(
@@ -238,6 +274,7 @@ private fun DashboardContent(
                     icon = Icons.Default.PersonAddAlt,
                     accent = MaterialTheme.colorScheme.tertiary,
                     caption = "pending or expired",
+                    onClick = { onStatClick(DashboardStatCategory.FACE_ENROLLMENT) },
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -268,14 +305,16 @@ private fun DashboardContent(
 
         item { SectionHeader(title = "Quick actions") }
 
-        item {
-            QuickActionCard(
-                title = "Scan attendance",
-                description = "Open the face scanner for check in or check out",
-                icon = Icons.Default.CameraAlt,
-                accent = MaterialTheme.colorScheme.primary,
-                onClick = onOpenScan,
-            )
+        if (canEnrollFaces) {
+            item {
+                QuickActionCard(
+                    title = "Enroll face",
+                    description = "Capture 3-pose biometric profile for an employee",
+                    icon = Icons.Default.FaceRetouchingNatural,
+                    accent = MaterialTheme.colorScheme.primary,
+                    onClick = onEnrollFace,
+                )
+            }
         }
         item {
             QuickActionCard(

@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apartment
 import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material.icons.filled.PersonOutline
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -38,6 +39,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.facerem.BuildConfig
 import com.facerem.core.designsystem.component.AppTextField
 import com.facerem.core.designsystem.component.BrandMark
 import com.facerem.core.designsystem.component.InlineMessage
@@ -63,6 +65,8 @@ fun LoginRoute(
         onOrganizationCodeChange = viewModel::onOrganizationCodeChange,
         onEmailChange = viewModel::onEmailChange,
         onPasswordChange = viewModel::onPasswordChange,
+        onTotpCodeChange = viewModel::onTotpCodeChange,
+        onBackToCredentials = viewModel::resetTotpPrompt,
         onRememberMeChange = viewModel::onRememberMeChange,
         onSignIn = viewModel::signIn,
         onGuestMode = viewModel::continueAsGuest,
@@ -77,6 +81,8 @@ private fun LoginScreen(
     onOrganizationCodeChange: (String) -> Unit,
     onEmailChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
+    onTotpCodeChange: (String) -> Unit,
+    onBackToCredentials: () -> Unit,
     onRememberMeChange: (Boolean) -> Unit,
     onSignIn: () -> Unit,
     onGuestMode: () -> Unit,
@@ -120,112 +126,156 @@ private fun LoginScreen(
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
             ) {
                 Column(modifier = Modifier.padding(Spacing.lg)) {
-                    AppTextField(
-                        value = uiState.organizationCode,
-                        onValueChange = onOrganizationCodeChange,
-                        label = "Organization code (optional)",
-                        supportingText = "Leave empty for single-tenant account",
-                        leadingIcon = Icons.Default.Apartment,
-                        enabled = !uiState.isSubmitting,
-                    )
-                    Spacer(Modifier.height(Spacing.md))
-                    AppTextField(
-                        value = uiState.email,
-                        onValueChange = onEmailChange,
-                        label = "Work email",
-                        errorText = uiState.emailError,
-                        leadingIcon = Icons.Default.MailOutline,
-                        keyboardType = KeyboardType.Email,
-                        enabled = !uiState.isSubmitting,
-                    )
-                    Spacer(Modifier.height(Spacing.md))
-                    PasswordField(
-                        value = uiState.password,
-                        onValueChange = onPasswordChange,
-                        errorText = uiState.passwordError,
-                        enabled = !uiState.isSubmitting,
-                        imeAction = ImeAction.Done,
-                    )
-
-                    Spacer(Modifier.height(Spacing.xs))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(checked = uiState.rememberMe, onCheckedChange = onRememberMeChange)
-                            Text("Keep me signed in", style = MaterialTheme.typography.bodyMedium)
+                    if (uiState.isTotpRequired) {
+                        Text(
+                            "Two-factor authentication",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Spacer(Modifier.height(Spacing.xs))
+                        Text(
+                            "Enter the 6-digit verification code from your authenticator app, or an 8-character recovery code.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(Spacing.md))
+                        AppTextField(
+                            value = uiState.totpCode,
+                            onValueChange = onTotpCodeChange,
+                            label = "2FA or recovery code",
+                            supportingText = "e.g. 123456 or 8-character recovery code",
+                            errorText = uiState.totpError,
+                            leadingIcon = Icons.Default.Security,
+                            keyboardType = KeyboardType.Ascii,
+                            enabled = !uiState.isSubmitting,
+                        )
+                        InlineMessage(text = uiState.formError)
+                        Spacer(Modifier.height(Spacing.md))
+                        PrimaryButton(
+                            text = "Verify and sign in",
+                            onClick = onSignIn,
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = uiState.canSubmit,
+                            loading = uiState.isSubmitting,
+                        )
+                        Spacer(Modifier.height(Spacing.xs))
+                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            TextButton(onClick = onBackToCredentials) {
+                                Text("Back to login")
+                            }
                         }
-                        TextButton(onClick = onForgotPassword) { Text("Forgot?", fontWeight = FontWeight.SemiBold) }
-                    }
+                    } else {
+                        AppTextField(
+                            value = uiState.organizationCode,
+                            onValueChange = onOrganizationCodeChange,
+                            label = "Organization code (optional)",
+                            supportingText = "Leave empty for single-tenant account",
+                            leadingIcon = Icons.Default.Apartment,
+                            enabled = !uiState.isSubmitting,
+                        )
+                        Spacer(Modifier.height(Spacing.md))
+                        AppTextField(
+                            value = uiState.email,
+                            onValueChange = onEmailChange,
+                            label = "Work email",
+                            errorText = uiState.emailError,
+                            leadingIcon = Icons.Default.MailOutline,
+                            keyboardType = KeyboardType.Email,
+                            enabled = !uiState.isSubmitting,
+                        )
+                        Spacer(Modifier.height(Spacing.md))
+                        PasswordField(
+                            value = uiState.password,
+                            onValueChange = onPasswordChange,
+                            errorText = uiState.passwordError,
+                            enabled = !uiState.isSubmitting,
+                            imeAction = ImeAction.Done,
+                        )
 
-                    InlineMessage(text = uiState.formError)
+                        Spacer(Modifier.height(Spacing.xs))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = uiState.rememberMe, onCheckedChange = onRememberMeChange)
+                                Text("Keep me signed in", style = MaterialTheme.typography.bodyMedium)
+                            }
+                            TextButton(onClick = onForgotPassword) { Text("Forgot?", fontWeight = FontWeight.SemiBold) }
+                        }
 
-                    Spacer(Modifier.height(Spacing.md))
-                    PrimaryButton(
-                        text = "Sign in",
-                        onClick = onSignIn,
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = uiState.canSubmit,
-                        loading = uiState.isSubmitting,
-                    )
+                        InlineMessage(text = uiState.formError)
 
-                    Spacer(Modifier.height(Spacing.xs))
-                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        TextButton(onClick = onUseDemoCredentials) { Text("Fill demo credentials") }
+                        Spacer(Modifier.height(Spacing.md))
+                        PrimaryButton(
+                            text = "Sign in",
+                            onClick = onSignIn,
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = uiState.canSubmit,
+                            loading = uiState.isSubmitting,
+                        )
+
+                        if (BuildConfig.DEBUG) {
+                            Spacer(Modifier.height(Spacing.xs))
+                            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                TextButton(onClick = onUseDemoCredentials) { Text("Fill demo credentials") }
+                            }
+                        }
                     }
                 }
             }
 
-            Spacer(Modifier.height(Spacing.xl))
+            if (BuildConfig.DEBUG) {
+                Spacer(Modifier.height(Spacing.xl))
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                HorizontalDivider(modifier = Modifier.weight(1f))
-                Text(
-                    "  OR  ",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                HorizontalDivider(modifier = Modifier.weight(1f))
-            }
-
-            Spacer(Modifier.height(Spacing.xl))
-
-            // Prominent Guest Mode option at the bottom
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(
-                        1.dp,
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
-                        RoundedCornerShape(24.dp),
-                    ),
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-            ) {
-                Column(
-                    modifier = Modifier.padding(Spacing.lg),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
+                    HorizontalDivider(modifier = Modifier.weight(1f))
                     Text(
-                        "Want to explore without signing in?",
-                        style = MaterialTheme.typography.bodySmall,
+                        "  OR  ",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = FontWeight.Medium,
                     )
-                    Spacer(Modifier.height(Spacing.sm))
-                    SecondaryButton(
-                        text = if (uiState.isGuestSubmitting) "Preparing demo workspace…" else "Continue as guest",
-                        onClick = onGuestMode,
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !uiState.isSubmitting && !uiState.isGuestSubmitting,
-                        leadingIcon = Icons.Default.PersonOutline,
-                    )
+                    HorizontalDivider(modifier = Modifier.weight(1f))
+                }
+
+                Spacer(Modifier.height(Spacing.xl))
+
+                // Prominent Guest Mode option at the bottom
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(
+                            1.dp,
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                            RoundedCornerShape(24.dp),
+                        ),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(Spacing.lg),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            "Want to explore without signing in?",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Spacer(Modifier.height(Spacing.sm))
+                        SecondaryButton(
+                            text = if (uiState.isGuestSubmitting) "Preparing demo workspace…" else "Continue as guest",
+                            onClick = onGuestMode,
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !uiState.isSubmitting && !uiState.isGuestSubmitting,
+                            leadingIcon = Icons.Default.PersonOutline,
+                        )
+                    }
                 }
             }
 

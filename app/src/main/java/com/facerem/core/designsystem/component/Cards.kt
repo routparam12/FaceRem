@@ -63,25 +63,32 @@ fun StatCard(
     accent: Color,
     modifier: Modifier = Modifier,
     caption: String? = null,
+    onClick: (() -> Unit)? = null,
 ) {
-    Card(
-        modifier = modifier
-            .border(1.dp, accent.copy(alpha = 0.22f), MaterialTheme.shapes.extraLarge),
-        shape = MaterialTheme.shapes.extraLarge,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-    ) {
+    val cardContent: @Composable () -> Unit = {
         Column(modifier = Modifier.padding(Spacing.lg)) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(accent.copy(alpha = 0.16f)),
-                contentAlignment = Alignment.Center,
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(22.dp))
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(accent.copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(22.dp))
+                }
+                if (onClick != null) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "View details",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
             }
             Spacer(Modifier.height(Spacing.md))
             Text(
@@ -106,6 +113,27 @@ fun StatCard(
                     fontWeight = FontWeight.SemiBold,
                 )
             }
+        }
+    }
+
+    if (onClick != null) {
+        Card(
+            onClick = onClick,
+            modifier = modifier.border(1.dp, accent.copy(alpha = 0.22f), MaterialTheme.shapes.extraLarge),
+            shape = MaterialTheme.shapes.extraLarge,
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        ) {
+            cardContent()
+        }
+    } else {
+        Card(
+            modifier = modifier.border(1.dp, accent.copy(alpha = 0.22f), MaterialTheme.shapes.extraLarge),
+            shape = MaterialTheme.shapes.extraLarge,
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        ) {
+            cardContent()
         }
     }
 }

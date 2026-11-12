@@ -220,4 +220,42 @@ End-to-end recognition includes: Image decode + SCRFD face detection + 5-point a
 - **`frontend/` directory**:
   - Removed all 38 legacy files and untracked APK asset (`git rm -r frontend`).
 
+---
+
+## 8. Web Console Liquid Glass Restyling & Scanner Gating
+
+### 8.1 Overview & Playwright Selector Stability
+- **Design Tokens & Visual Refresh**: Redesigned `web/` with a high-fidelity "liquid glass" theme matching the Android mobile application: soft full-page gradient, blurred radial color blobs behind content, translucent glass panels (`backdrop-filter: blur(18px) saturate(140%)`, `rgba(255,255,255,0.62)` light / `rgba(20,25,45,0.55)` dark), large border radii (20-28px), and pill-shaped status badges.
+- **Zero Selector Breakage**: Semantic locators, button text, page headings (`h1`), input names, attributes (`type="email"`, `type="password"`, `autocomplete="organization"`), and ARIA roles were strictly preserved. All existing Playwright test suites (e.g. `web/tests/smoke.spec.ts`) continue to locate elements via their standard semantic selectors without modification.
+- **Web Scanner Gated**:
+  - Web scanner is disabled by default. The "Web Scanner" nav link in the sidebar and the "Open scanner" button on `/dashboard` are hidden unless `NEXT_PUBLIC_ENABLE_WEB_SCANNER=1`.
+  - Direct navigation to `/dashboard/scan` redirects to `/dashboard` unless the flag is explicitly set. Dedicated Android hardware (`faceattend-kiosk`) is the primary kiosk.
+- **Theme Toggle**:
+  - Header includes a "Liquid glass" toggle button. Toggling switches between Liquid Glass and Flat themes via `data-theme="flat"` attribute on `<html>`.
+  - Preference is persisted exclusively in `localStorage` key `faceattend_theme`. An anti-flash inline script in `layout.tsx` prevents FOUC.
+- **Accessibility & Fallbacks**:
+  - High contrast ratios (text `>= 4.5:1`), visible focus rings.
+  - `@supports not (backdrop-filter)` falls back to near-opaque backgrounds.
+  - `@media (prefers-reduced-transparency: reduce)` falls back to opaque cards.
+  - `@media (prefers-reduced-motion: reduce)` disables background blob float animations.
+
+### 8.2 Files Changed
+- `web/src/app/globals.css`: Added complete liquid glass CSS token system (`:root`, dark mode `@media (prefers-color-scheme: dark)`, and `[data-theme="flat"]` overrides), glass utility classes (`.glass-panel`, `.glass-pill`, `.liquid-bg`, `.liquid-blob-1/2/3`), and accessibility fallbacks.
+- `web/src/components/theme-toggle.tsx`: Client component providing accessible Liquid glass On/Off toggle button persisting to `localStorage.getItem("faceattend_theme")`.
+- `web/src/app/layout.tsx`: Injected anti-flash script in `<head>` and rendered background `.liquid-bg` with ambient gradient blobs behind content.
+- `web/src/app/dashboard/layout.tsx`: Removed opaque container background so liquid glass backdrop shines through page content.
+- `web/src/components/ui.tsx`: Styled `Card` with `glass-panel`, updated `Pill` to `rounded-full` pill shape, set input fields to legible semi-opaque background (`bg-[var(--glass-input-bg)]`), updated `Button` and `Banner` radius and accents.
+- `web/src/components/nav.tsx`: Styled top bar and sidebar with `glass-panel`, highlighted active navigation item with `glass-pill` (`rounded-full`), added `ThemeToggle` to header, and gated "Web Scanner" behind `NEXT_PUBLIC_ENABLE_WEB_SCANNER === "1"`.
+- `web/src/app/page.tsx`: Transformed landing page from flat white to liquid glass skin: sticky glass top bar with ThemeToggle and glass sign-in button, glass pill badge, live preview stats glass panel, capability feature glass panels, workflow step glass panels, and glass footer with full ambient gradient background visibility.
+- `web/src/app/login/page.tsx`: Transformed split layout into a centered glass card on full-screen liquid gradient while strictly preserving all form inputs, headings, and the session-expired banner.
+- `web/src/app/dashboard/page.tsx`: Gated "Open scanner" dashboard button behind `NEXT_PUBLIC_ENABLE_WEB_SCANNER === "1"`.
+- `web/src/app/dashboard/scan/page.tsx`: Added redirect to `/dashboard` if `NEXT_PUBLIC_ENABLE_WEB_SCANNER !== "1"`.
+- `web/src/app/dashboard/cameras/page.tsx`: Converted "Add Camera" and "Configure Camera" modal dialogs to `glass-panel`.
+- `web/src/app/dashboard/devices/page.tsx`: Converted "Enrollment Code", "Edit Device", and "Revoke Device" modal dialogs to `glass-panel`.
+- `web/src/components/attendance-event-list.tsx`: Converted "Void Attendance Event" modal dialog to `glass-panel`.
+- `web/src/components/audit-log-viewer.tsx`: Converted "Audit Event Metadata" JSON inspect modal dialog to `glass-panel`.
+- `web/README.md`: Documented that the web scanner is disabled by default and Android kiosk hardware is primary.
+- `docs/TESTING_HANDOFF.md`: Updated testing documentation with liquid glass and selector notes.
+
+
 

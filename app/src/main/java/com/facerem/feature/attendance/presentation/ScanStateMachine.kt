@@ -7,9 +7,10 @@ import com.facerem.core.model.RecognitionOutcome
 /** How long a result stays on screen before the kiosk arms itself for the next person. */
 object ScanTiming {
     const val REQUIRED_STABLE_FRAMES = 6
-    const val SUCCESS_HOLD_MILLIS = 2_600L
-    const val REPEAT_HOLD_MILLIS = 2_000L
-    const val FAILURE_HOLD_MILLIS = 3_600L
+    const val SUCCESS_HOLD_MILLIS = 3_000L
+    const val REPEAT_HOLD_MILLIS = 3_000L
+    const val FAILURE_HOLD_MILLIS = 3_000L
+    const val RESULT_HOLD_MILLIS = 3_000L
 }
 
 /** The outcome of feeding one analyser verdict into the scanner. */
@@ -61,13 +62,6 @@ fun ScanUiState.armedForNextScan(): ScanUiState = copy(
     awaitingFaceClear = true,
 )
 
-/** A greeting can be brief; something that needs attention stays up longer. */
-fun resultHoldMillis(outcome: RecognitionOutcome?, errorMessage: String?): Long = when {
-    errorMessage != null -> ScanTiming.FAILURE_HOLD_MILLIS
-    outcome is RecognitionOutcome.NotRecognized -> ScanTiming.FAILURE_HOLD_MILLIS
-    outcome is RecognitionOutcome.Rejected -> ScanTiming.FAILURE_HOLD_MILLIS
-    (outcome as? RecognitionOutcome.Recognized)?.eventType == AttendanceEventType.ALREADY_PRESENT ->
-        ScanTiming.REPEAT_HOLD_MILLIS
-
-    else -> ScanTiming.SUCCESS_HOLD_MILLIS
-}
+/** Holds result on screen for ~3 seconds before returning to scanning mode. */
+fun resultHoldMillis(outcome: RecognitionOutcome?, errorMessage: String?): Long =
+    ScanTiming.RESULT_HOLD_MILLIS

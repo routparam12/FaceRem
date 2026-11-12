@@ -20,8 +20,11 @@ data class ApiErrorBody(
 
 @Serializable
 data class TokenPairDto(
-    @SerialName("access_token") val accessToken: String,
-    @SerialName("refresh_token") val refreshToken: String,
+    @SerialName("access_token") val accessToken: String = "",
+    @SerialName("refresh_token") val refreshToken: String = "",
+    @SerialName("token_type") val tokenType: String = "bearer",
+    @SerialName("totp_required") val totpRequired: Boolean = false,
+    @SerialName("challenge_token") val challengeToken: String? = null,
 )
 
 @Serializable
@@ -29,6 +32,7 @@ data class LoginRequestDto(
     val email: String,
     val password: String,
     @SerialName("organization_slug") val organizationSlug: String? = null,
+    @SerialName("totp_code") val totpCode: String? = null,
 )
 
 @Serializable
@@ -193,4 +197,34 @@ data class DeviceEventRequestDto(
 data class DeviceEventResponseDto(
     val status: String = "recorded",
     @SerialName("event_type") val eventType: String,
+)
+
+@Serializable
+data class DepartmentRateDto(
+    val department: String,
+    val rate: Float,
+    @SerialName("head_count") val headCount: Int,
+)
+
+@Serializable
+data class ReportSummaryDto(
+    @SerialName("period_label") val periodLabel: String,
+    @SerialName("average_attendance_rate") val averageAttendanceRate: Float,
+    @SerialName("total_worked_hours") val totalWorkedHours: Int,
+    @SerialName("total_overtime_hours") val totalOvertimeHours: Int,
+    @SerialName("late_arrivals") val lateArrivals: Int,
+    val absences: Int,
+    @SerialName("department_breakdown") val departmentBreakdown: List<DepartmentRateDto> = emptyList(),
+)
+
+@Serializable
+data class UpdateEmployeeDto(
+    @SerialName("full_name") val fullName: String? = null,
+    val email: String? = null,
+    val phone: String? = null,
+    val department: String? = null,
+    val branch: String? = null,
+    @SerialName("job_title") val jobTitle: String? = null,
+    @SerialName("shift_name") val shiftName: String? = null,
+    @SerialName("is_active") val isActive: Boolean? = null,
 )

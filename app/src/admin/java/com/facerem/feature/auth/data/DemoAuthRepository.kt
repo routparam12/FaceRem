@@ -23,7 +23,12 @@ class DemoAuthRepository @Inject constructor(
     private val sessionManager: SessionManager,
 ) : AuthRepository {
 
-    override suspend fun login(email: String, password: String, organizationCode: String): AppResult<User> {
+    override suspend fun login(
+        email: String,
+        password: String,
+        organizationCode: String,
+        totpCode: String?,
+    ): AppResult<User> {
         delay(NETWORK_SIMULATION_MILLIS)
         if (password.equals("wrong", ignoreCase = true)) {
             return AppResult.Error(

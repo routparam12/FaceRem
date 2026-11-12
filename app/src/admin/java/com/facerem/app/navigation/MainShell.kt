@@ -1,22 +1,9 @@
 package com.facerem.app.navigation
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.FabPosition
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -31,21 +18,30 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ripple
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FaceRetouchingNatural
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.ui.Modifier
-import com.facerem.ui.theme.Glass
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -55,26 +51,39 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.facerem.feature.dashboard.presentation.DashboardRoute
 import com.facerem.feature.employees.presentation.EmployeesRoute
+import com.facerem.feature.faceenrollment.presentation.EmployeePickerSheet
 import com.facerem.feature.history.presentation.HistoryRoute
 import com.facerem.feature.settings.presentation.SettingsRoute
+import com.facerem.ui.theme.Glass
+
+import androidx.compose.material3.ExperimentalMaterial3Api
 
 /**
  * Bottom-navigation container. Tab switching lives in a nested graph so the root back stack keeps
- * modal flows (scan, enrollment, employee detail) above the shell.
+ * modal flows (face enrollment, employee detail) above the shell.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainShell(
     onSignedOut: () -> Unit,
     onOpenDestination: (String) -> Unit,
+    viewModel: MainShellViewModel = hiltViewModel(),
 ) {
     val tabController = rememberNavController()
     val backStackEntry by tabController.currentBackStackEntryAsState()
     val currentDestination = backStackEntry?.destination
 
-    // The bar floats over the content rather than sitting in a Scaffold slot. A slot would
-    // reserve its full height — including the space the raised button needs — leaving a dead
-    // band above the bar. Screens add BottomBarClearance to their own padding instead, so
-    // the page scrolls behind the bar and only the pill itself covers anything.
+    val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
+    val employees by viewModel.employees.collectAsStateWithLifecycle()
+    val isLoadingEmployees by viewModel.isLoadingEmployees.collectAsStateWithLifecycle()
+    val canEnrollFaces = currentUser?.role?.canEnrollFaces == true
+    var showEmployeePicker by remember { mutableStateOf(false) }
+
+    val openFaceEnrollmentPicker = {
+        viewModel.loadEmployees()
+        showEmployeePicker = true
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         NavHost(
             navController = tabController,
@@ -85,7 +94,7 @@ fun MainShell(
         ) {
             composable(AppRoute.Dashboard) {
                 DashboardRoute(
-                    onOpenScan = { onOpenDestination(AppRoute.Scan) },
+                    onEnrollFace = openFaceEnrollmentPicker,
                     onOpenEmployees = { tabController.navigateToTab(AppRoute.Employees) },
                     onOpenHistory = { tabController.navigateToTab(AppRoute.History) },
                     onOpenReports = { onOpenDestination(AppRoute.Reports) },
@@ -115,6 +124,7 @@ fun MainShell(
 
         FloatingNavBar(
             currentDestination = currentDestination,
+            canEnrollFaces = canEnrollFaces,
             onSelectTab = { tab ->
                 tabController.navigate(tab.route) {
                     popUpTo(tabController.graph.findStartDestination().id) { saveState = true }
@@ -122,9 +132,21 @@ fun MainShell(
                     restoreState = true
                 }
             },
-            onScan = { onOpenDestination(AppRoute.Scan) },
+            onEnrollFace = openFaceEnrollmentPicker,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
+
+        if (showEmployeePicker) {
+            EmployeePickerSheet(
+                employees = employees,
+                isLoading = isLoadingEmployees,
+                onDismissRequest = { showEmployeePicker = false },
+                onSelectEmployee = { employeeId ->
+                    showEmployeePicker = false
+                    onOpenDestination(AppRoute.faceEnrollment(employeeId))
+                },
+            )
+        }
     }
 }
 
@@ -143,32 +165,26 @@ private fun androidx.navigation.NavHostController.navigateToTab(route: String) {
  */
 val BottomBarClearance = 116.dp
 
-/** How far the scan button is lifted clear of the bar. */
+/** How far the center button is lifted clear of the bar. */
 private val ScanLift = 32.dp
 private val ScanSize = 64.dp
 private val BarHeight = 64.dp
 
 /**
- * The bottom bar, drawn as a floating pill with the scanner raised out of it.
- *
- * The scanner is the one action a person at a gate actually performs, so it is pulled out
- * of the row and given its own weight rather than competing with four tabs. A ring in the
- * page colour separates it from the bar underneath, which is what makes it read as sitting
- * above rather than cut into it.
+ * The bottom bar, drawn as a floating pill with the center action raised out of it for admins.
  */
 @Composable
 private fun FloatingNavBar(
     currentDestination: NavDestination?,
+    canEnrollFaces: Boolean,
     onSelectTab: (MainTab) -> Unit,
-    onScan: () -> Unit,
+    onEnrollFace: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(
         modifier = modifier
             .fillMaxWidth()
-            // Room for the half of the button that sits above the bar; without it the
-            // button would be clipped by the bar's own bounds.
-            .padding(top = ScanLift + 12.dp)
+            .padding(top = if (canEnrollFaces) ScanLift + 12.dp else 12.dp)
             .navigationBarsPadding()
             .padding(horizontal = 16.dp, vertical = 12.dp),
         contentAlignment = Alignment.BottomCenter,
@@ -187,45 +203,50 @@ private fun FloatingNavBar(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Two tabs, a gap for the button, then two more.
-                MainTab.entries.take(2).forEach { tab ->
-                    NavTab(tab, currentDestination, onSelectTab, Modifier.weight(1f))
-                }
-                Spacer(Modifier.width(ScanSize + 16.dp))
-                MainTab.entries.drop(2).forEach { tab ->
-                    NavTab(tab, currentDestination, onSelectTab, Modifier.weight(1f))
+                if (canEnrollFaces) {
+                    MainTab.entries.take(2).forEach { tab ->
+                        NavTab(tab, currentDestination, onSelectTab, Modifier.weight(1f))
+                    }
+                    Spacer(Modifier.width(ScanSize + 16.dp))
+                    MainTab.entries.drop(2).forEach { tab ->
+                        NavTab(tab, currentDestination, onSelectTab, Modifier.weight(1f))
+                    }
+                } else {
+                    MainTab.entries.forEach { tab ->
+                        NavTab(tab, currentDestination, onSelectTab, Modifier.weight(1f))
+                    }
                 }
             }
         }
 
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .offset(y = -ScanLift)
-                .size(ScanSize + 12.dp)
-                .clip(CircleShape)
-                // The ring separates the button from the bar. In glass mode the page behind
-                // is a gradient, so a sheer fill reads as a gap where the backdrop shows.
-                .background(
-                    if (Glass.isActive) Glass.tokens.cutout
-                    else MaterialTheme.colorScheme.background,
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Surface(
-                onClick = onScan,
-                modifier = Modifier.size(ScanSize),
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                shadowElevation = 8.dp,
+        if (canEnrollFaces) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset(y = -ScanLift)
+                    .size(ScanSize + 12.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (Glass.isActive) Glass.tokens.cutout
+                        else MaterialTheme.colorScheme.background,
+                    ),
+                contentAlignment = Alignment.Center,
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Default.CameraAlt,
-                        contentDescription = "Scan attendance",
-                        modifier = Modifier.size(28.dp),
-                    )
+                Surface(
+                    onClick = onEnrollFace,
+                    modifier = Modifier.size(ScanSize),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    shadowElevation = 8.dp,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.FaceRetouchingNatural,
+                            contentDescription = "Enroll face",
+                            modifier = Modifier.size(28.dp),
+                        )
+                    }
                 }
             }
         }
@@ -251,7 +272,6 @@ private fun NavTab(
             .fillMaxHeight()
             .clip(RoundedCornerShape(16.dp))
             .clickable(
-                // No ripple bleeding outside the pill's rounded corners.
                 interactionSource = remember { MutableInteractionSource() },
                 indication = ripple(bounded = false, radius = 28.dp),
                 onClick = { onSelect(tab) },

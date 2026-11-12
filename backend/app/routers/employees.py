@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile
 from starlette.datastructures import UploadFile as StarletteUploadFile
 import numpy as np
 from sqlalchemy import delete, func, select
@@ -27,6 +27,13 @@ from ..face import embed_async, get_engine
 from ..models import Branch, Department, Employee, FaceProfile, Shift
 from ..schemas import EmployeeCreate, EmployeeOut, EmployeeUpdate, EnrollResponse, SetPinRequest
 from ..security import AppError, Principal, hash_password, record_audit, require_roles, tenant_scope
+from ..storage import (
+    delete_profile_picture,
+    get_profile_picture,
+    get_scan_photo,
+    list_recent_scan_photos,
+    save_profile_picture,
+)
 
 router = APIRouter()
 
@@ -385,6 +392,7 @@ async def enroll_face(
 
     MAX_FRAME_BYTES = 2 * 1024 * 1024
     extracted_embeddings: list[tuple[Any, str]] = []
+    front_image_bytes: bytes | None = None
 
     for upload_file, pose in frames_with_poses:
         if upload_file.content_type not in ALLOWED_IMAGE_TYPES:
@@ -394,6 +402,9 @@ async def enroll_face(
             raise AppError("VALIDATION_ERROR", "Uploaded frame was empty.", 422)
         if len(raw_bytes) > MAX_FRAME_BYTES:
             raise AppError("FILE_TOO_LARGE", "Frame exceeds the maximum allowed size of 2 MB.", 413)
+
+        if pose == "FRONT" and front_image_bytes is None:
+            front_image_bytes = raw_bytes
 
         embedding = await embed_async(raw_bytes, expected_pose=pose)
         extracted_embeddings.append((embedding, pose))
@@ -464,6 +475,9 @@ async def enroll_face(
     )
     db.commit()
 
+    if front_image_bytes:
+        save_profile_picture(employee.organization_id, employee.id, front_image_bytes)
+
     avg_quality = float(sum(p.quality_score for p in new_profiles) / len(new_profiles))
     return EnrollResponse(
         employee_id=employee.id,
@@ -504,9 +518,53 @@ def revoke_face(
         deleted_profiles=count,
     )
     db.commit()
+    delete_profile_picture(employee.organization_id, employee.id)
     return {
         "employee_id": employee.id,
         "deleted_profiles": count,
         "revoked_profiles": count,
         "attendance_retained": True,
     }
+
+
+@router.get("/employees/{employee_id}/avatar")
+def get_employee_avatar(
+    employee_id: str,
+    principal: Principal = Depends(require_roles(*VIEWER_ROLES)),
+    db: Session = Depends(get_db),
+    _: Principal = Depends(tenant_scope),
+) -> Response:
+    """Returns the employee's profile photo captured during enrollment."""
+    employee = get_scoped_employee(db, principal, employee_id)
+    img_bytes = get_profile_picture(employee.organization_id, employee.id)
+    if not img_bytes:
+        raise AppError("NOT_FOUND", "Profile photo not found.", 404)
+    return Response(content=img_bytes, media_type="image/jpeg")
+
+
+@router.get("/employees/{employee_id}/recent-scans")
+def get_recent_scans(
+    employee_id: str,
+    principal: Principal = Depends(require_roles(*STAFF_ROLES)),
+    db: Session = Depends(get_db),
+    _: Principal = Depends(tenant_scope),
+) -> list[dict]:
+    """Returns metadata for recent kiosk verification scan photos from the last 7 days (admin-only)."""
+    employee = get_scoped_employee(db, principal, employee_id)
+    return list_recent_scan_photos(employee.organization_id, employee.id, max_age_days=7)
+
+
+@router.get("/employees/{employee_id}/recent-scans/{photo_id}")
+def get_recent_scan_photo(
+    employee_id: str,
+    photo_id: str,
+    principal: Principal = Depends(require_roles(*STAFF_ROLES)),
+    db: Session = Depends(get_db),
+    _: Principal = Depends(tenant_scope),
+) -> Response:
+    """Streams a kiosk verification scan photo from the last 7 days (admin-only)."""
+    employee = get_scoped_employee(db, principal, employee_id)
+    img_bytes = get_scan_photo(employee.organization_id, employee.id, photo_id)
+    if not img_bytes:
+        raise AppError("NOT_FOUND", "Scan photo not found or has expired past 7 days.", 404)
+    return Response(content=img_bytes, media_type="image/jpeg")

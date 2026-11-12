@@ -1,5 +1,8 @@
 package com.facerem.core.designsystem.component
 
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.ui.graphics.Color
+import com.facerem.ui.theme.Glass
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -268,6 +271,7 @@ fun ConfirmationDialog(
         text = { Text(message) },
         confirmButton = { TextButton(onClick = onConfirm) { Text(confirmText) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        containerColor = if (Glass.isActive) Color.White else MaterialTheme.colorScheme.surface,
     )
 }
 
@@ -283,7 +287,7 @@ fun AppTopBar(
     TopAppBar(
         title = {
             Column {
-                Text(title, style = MaterialTheme.typography.titleLarge)
+                Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 if (subtitle != null) {
                     Text(
                         subtitle,
@@ -293,7 +297,7 @@ fun AppTopBar(
                 }
             }
         },
-        modifier = modifier,
+        modifier = modifier.statusBarsPadding(),
         navigationIcon = {
             if (onNavigateUp != null) {
                 IconButton(onClick = onNavigateUp) {
@@ -302,7 +306,10 @@ fun AppTopBar(
             }
         },
         actions = actions,
-        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = Color.Transparent,
+            scrolledContainerColor = Color.Transparent,
+        ),
     )
 }
 

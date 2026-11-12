@@ -293,8 +293,8 @@ export default function AttendanceEventList({
 
       {/* Mandatory Reason Void Modal */}
       {voidingEventId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 backdrop-blur-xs p-4">
+          <div className="glass-panel w-full max-w-md p-6 shadow-2xl">
             <h3 className="text-lg font-bold text-ink-900">Void Attendance Event</h3>
             <p className="mt-1 text-xs text-ink-500">
               Voiding retracts this attendance scan from daily summaries while preserving the event

@@ -4,9 +4,11 @@ import com.facerem.core.model.AttendanceEventType
 import com.facerem.core.model.AttendanceRecord
 import com.facerem.core.model.AttendanceStatus
 import com.facerem.core.model.DashboardSummary
+import com.facerem.core.model.DepartmentRate
 import com.facerem.core.model.Employee
 import com.facerem.core.model.FaceEnrollmentStatus
 import com.facerem.core.model.RecognitionOutcome
+import com.facerem.core.model.ReportSummary
 import com.facerem.core.model.Role
 import com.facerem.core.model.User
 import com.facerem.core.network.dto.AttendanceRecordDto
@@ -15,6 +17,7 @@ import com.facerem.core.network.dto.EmployeeDto
 import com.facerem.core.network.dto.MeDto
 import com.facerem.core.network.dto.PinVerifyResponseDto
 import com.facerem.core.network.dto.RecognizeResponseDto
+import com.facerem.core.network.dto.ReportSummaryDto
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -129,4 +132,16 @@ fun DashboardDto.toSummary(recent: List<AttendanceRecord>) = DashboardSummary(
     pendingEnrollments = pendingEnrollments,
     weeklyAttendanceRate = emptyList(),
     recentActivity = recent,
+)
+
+fun ReportSummaryDto.toReportSummary() = ReportSummary(
+    periodLabel = periodLabel,
+    averageAttendanceRate = averageAttendanceRate,
+    totalWorkedHours = totalWorkedHours,
+    totalOvertimeHours = totalOvertimeHours,
+    lateArrivals = lateArrivals,
+    absences = absences,
+    departmentBreakdown = departmentBreakdown.map {
+        DepartmentRate(department = it.department, rate = it.rate, headCount = it.headCount)
+    },
 )

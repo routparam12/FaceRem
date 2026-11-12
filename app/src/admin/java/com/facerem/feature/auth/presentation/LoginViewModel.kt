@@ -2,6 +2,7 @@ package com.facerem.feature.auth.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.facerem.core.common.AppError
 import com.facerem.core.common.AppResult
 import com.facerem.core.common.Validators
 import com.facerem.feature.auth.domain.AuthRepository
@@ -16,16 +17,23 @@ data class LoginUiState(
     val organizationCode: String = "",
     val email: String = "",
     val password: String = "",
+    val totpCode: String = "",
+    val isTotpRequired: Boolean = false,
     val rememberMe: Boolean = true,
     val emailError: String? = null,
     val passwordError: String? = null,
+    val totpError: String? = null,
     val formError: String? = null,
     val isSubmitting: Boolean = false,
     val isGuestSubmitting: Boolean = false,
     val authenticated: Boolean = false,
 ) {
     val canSubmit: Boolean
-        get() = !isSubmitting && !isGuestSubmitting && email.isNotBlank() && password.isNotBlank()
+        get() = if (isTotpRequired) {
+            !isSubmitting && totpCode.isNotBlank()
+        } else {
+            !isSubmitting && !isGuestSubmitting && email.isNotBlank() && password.isNotBlank()
+        }
 }
 
 @HiltViewModel
@@ -48,12 +56,42 @@ class LoginViewModel @Inject constructor(
         mutableUiState.update { it.copy(password = value, passwordError = null, formError = null) }
     }
 
+    fun onTotpCodeChange(value: String) {
+        mutableUiState.update { it.copy(totpCode = value, totpError = null, formError = null) }
+    }
+
+    fun resetTotpPrompt() {
+        mutableUiState.update { it.copy(isTotpRequired = false, totpCode = "", totpError = null, formError = null) }
+    }
+
     fun onRememberMeChange(value: Boolean) {
         mutableUiState.update { it.copy(rememberMe = value) }
     }
 
     fun signIn() {
         val state = mutableUiState.value
+        if (state.isTotpRequired) {
+            if (state.totpCode.isBlank()) {
+                mutableUiState.update { it.copy(totpError = "Verification code is required.") }
+                return
+            }
+            mutableUiState.update { it.copy(isSubmitting = true, formError = null, totpError = null) }
+            viewModelScope.launch {
+                when (val result = authRepository.login(state.email, state.password, state.organizationCode, state.totpCode)) {
+                    is AppResult.Success -> mutableUiState.update {
+                        it.copy(isSubmitting = false, authenticated = true)
+                    }
+
+                    is AppResult.Error -> mutableUiState.update {
+                        it.copy(isSubmitting = false, formError = result.error.userMessage)
+                    }
+
+                    AppResult.Loading -> Unit
+                }
+            }
+            return
+        }
+
         val emailError = Validators.emailError(state.email)
         val passwordError = Validators.passwordError(state.password)
         if (emailError != null || passwordError != null) {
@@ -63,13 +101,22 @@ class LoginViewModel @Inject constructor(
 
         mutableUiState.update { it.copy(isSubmitting = true, formError = null) }
         viewModelScope.launch {
-            when (val result = authRepository.login(state.email, state.password, state.organizationCode)) {
+            when (val result = authRepository.login(state.email, state.password, state.organizationCode, null)) {
                 is AppResult.Success -> mutableUiState.update {
                     it.copy(isSubmitting = false, authenticated = true)
                 }
 
-                is AppResult.Error -> mutableUiState.update {
-                    it.copy(isSubmitting = false, formError = result.error.userMessage)
+                is AppResult.Error -> {
+                    val err = result.error
+                    if (err is AppError.Api && err.code == "TOTP_REQUIRED") {
+                        mutableUiState.update {
+                            it.copy(isSubmitting = false, isTotpRequired = true, formError = null)
+                        }
+                    } else {
+                        mutableUiState.update {
+                            it.copy(isSubmitting = false, formError = err.userMessage)
+                        }
+                    }
                 }
 
                 AppResult.Loading -> Unit

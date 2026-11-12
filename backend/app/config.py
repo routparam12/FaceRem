@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     undo_window_seconds: int = 30
     standard_assurance_provisional: bool = True
 
-    seed_demo_data: bool = True
+    seed_demo_data: bool = False
     allow_legacy_kiosk_login: bool = True
 
     @property

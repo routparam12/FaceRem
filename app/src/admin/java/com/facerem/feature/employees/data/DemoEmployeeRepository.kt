@@ -12,6 +12,7 @@ import com.facerem.core.model.FaceEnrollmentStatus
 import com.facerem.core.model.Shift
 import com.facerem.feature.employees.domain.EmployeeRepository
 import com.facerem.feature.employees.domain.NewEmployee
+import com.facerem.feature.employees.domain.UpdateEmployee
 import javax.inject.Inject
 import kotlinx.coroutines.delay
 
@@ -58,6 +59,25 @@ class DemoEmployeeRepository @Inject constructor(
         )
         demoDataStore.addEmployee(created)
         return AppResult.Success(created)
+    }
+
+    override suspend fun updateEmployee(id: String, update: UpdateEmployee): AppResult<Employee> {
+        delay(350)
+        val existing = demoDataStore.employeeById(id)
+            ?: return AppResult.Error(
+                AppError.Api("EMPLOYEE_NOT_FOUND", "This employee is no longer available.", httpStatus = 404),
+            )
+        val updated = existing.copy(
+            fullName = update.fullName ?: existing.fullName,
+            email = update.email ?: existing.email,
+            phone = update.phone ?: existing.phone,
+            department = update.department ?: existing.department,
+            branch = update.branch ?: existing.branch,
+            jobTitle = update.jobTitle ?: existing.jobTitle,
+            shiftName = update.shiftName ?: existing.shiftName,
+            isActive = update.isActive ?: existing.isActive,
+        )
+        return AppResult.Success(updated)
     }
 
     override suspend fun submitFaceEnrollment(

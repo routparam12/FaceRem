@@ -514,3 +514,20 @@ class AuditLogOut(BaseModel):
     target_id: str
     meta: dict
     created_at: datetime
+
+
+class DepartmentRateOut(BaseModel):
+    department: str
+    rate: float
+    head_count: int
+
+
+class ReportSummaryOut(BaseModel):
+    period_label: str
+    average_attendance_rate: float
+    total_worked_hours: int
+    total_overtime_hours: int
+    late_arrivals: int
+    absences: int
+    department_breakdown: list[DepartmentRateOut]
+

@@ -1,79 +1,133 @@
-# FaceAttend web
+# FaceAttend Web Console
 
-The desktop console for the FaceAttend platform, and the public landing page. Next.js 15 App
-Router, React 19, Tailwind v4, TypeScript. It consumes the FastAPI service in [`../backend`](../backend).
+The web administration console and public landing page for the FaceAttend multi-tenant facial attendance platform, built with Next.js 15 (App Router), React 19, and Tailwind CSS.
+
+---
+
+## Quick Start
+
+### Installation & Run
 
 ```bash
 cd web
 npm install
-cp .env.example .env.local        # point API_BASE_URL at the backend
-npm run dev                       # http://localhost:3000
+cp .env.example .env.local    # adjust if backend is not at http://127.0.0.1:8000
+npm run dev                  # starts on http://localhost:3000
 ```
 
-The backend must be running:
+### Production Build
 
 ```bash
-cd ../backend && source .venv/bin/activate && uvicorn app.main:app --port 8000
+npm run build
+npm run start
 ```
 
-Sign in with any seeded account, password `demo12345` — `hr@northwind.demo` for the fullest view,
-`admin@northwind.demo` to also see the audit log, `employee@northwind.demo` to see the restricted
-view a regular employee gets.
+### Environment Variables
 
-## Pages
+| Variable | Default | Purpose |
+| :--- | :--- | :--- |
+| `API_BASE_URL` | `http://127.0.0.1:8000` | Backend URL called by Next.js Server Components and BFF route handlers (server-to-server). |
+| `COOKIE_SECURE` | `0` (dev) / `1` (prod) | Sets the `Secure` flag on `httpOnly` session cookies. Automatically `1` in production unless explicitly overridden. |
+| `NEXT_PUBLIC_ENABLE_WEB_SCANNER` | `undefined` (off) | Feature flag. When `"1"`, enables `/dashboard/scan` in the sidebar and routes for in-browser testing. |
+| `NEXT_PUBLIC_DEMO_MODE` | `undefined` (off) | When `"1"`, displays demo credential quick-fill buttons on the sign-in page. |
+| `ANDROID_APK_URL` | `undefined` (none) | URL to download the companion Android APK (shown on landing page and Devices screen). |
+| `ANDROID_APK_VERSION` | `null` | Optional release tag label displayed on APK download links (e.g. `v1.0.0`). |
+| `ANDROID_APK_SIZE` | `null` | Optional file size label displayed on APK download links (e.g. `18 MB`). |
 
-| Route | Who | What |
-| --- | --- | --- |
-| `/` | public | Landing page |
-| `/login` | public | Sign in |
-| `/dashboard` | any signed-in user | Today's totals and activity |
-| `/dashboard/employees` | staff + managers | Searchable roster with enrollment status |
-| `/dashboard/employees/new` | ORG_ADMIN, HR_ADMIN | Create an employee |
-| `/dashboard/employees/[id]` | staff + managers | Detail, face enrollment and revocation, history |
-| `/dashboard/scan` | ORG_ADMIN, HR_ADMIN, device | Webcam capture → server recognition, with a continuous kiosk loop |
-| `/dashboard/attendance` | all (employees see only their own) | Records grouped by date |
-| `/dashboard/audit` | ORG_ADMIN | Biometric and auth audit trail |
+---
 
-## Why the browser never sees a token
+## Console Pages & Role Permissions
 
-The API returns JWTs, but a token in `localStorage` is one XSS away from being exfiltrated — and
-this product's tokens unlock biometric data. So this app is a thin BFF:
+Employees do not sign in to the web console; authentication is restricted to organization staff (`ORGANIZATION_ADMIN`, `HR_ADMIN`, `MANAGER`).
 
-```text
-browser ──> Next.js route handler ──> FastAPI
-         (httpOnly cookie)        (Authorization: Bearer …)
+| Route | Page Title | Allowed Roles | Purpose |
+| :--- | :--- | :--- | :--- |
+| `/` | Landing Page | Public | Product overview and download link for the Android APK. |
+| `/login` | Staff Sign-in | Public (Unauthenticated) | Staff email, password, and 2FA TOTP verification challenge. |
+| `/dashboard` | Live Dashboard | `ORGANIZATION_ADMIN`, `HR_ADMIN`, `MANAGER` | Real-time attendance counts, present/late stats, and quick actions. |
+| `/dashboard/employees` | Personnel Roster | `ORGANIZATION_ADMIN`, `HR_ADMIN`, `MANAGER` | Employee list with search, department filtering, and face status. |
+| `/dashboard/employees/new` | Add Employee | `ORGANIZATION_ADMIN`, `HR_ADMIN` | Enrolls a new employee into the organization roster. |
+| `/dashboard/employees/[id]` | Employee Details | `ORGANIZATION_ADMIN`, `HR_ADMIN`, `MANAGER` | Profile details, avatar, 3-pose face enrollment, and rolling 7-day scan audit gallery. |
+| `/dashboard/attendance` | Daily Attendance | `ORGANIZATION_ADMIN`, `HR_ADMIN`, `MANAGER` | Daily check-in/out records, status badges (`PRESENT`, `LATE`, `ABSENT`), and CSV export. |
+| `/dashboard/devices` | Kiosk Hardware | `ORGANIZATION_ADMIN`, `HR_ADMIN` | Tablet pairing code generator (10m single-use), device status, and instant revocation. |
+| `/dashboard/cameras` | Camera Streams | `ORGANIZATION_ADMIN`, `HR_ADMIN` | Directional camera configuration (`IN_ONLY`, `OUT_ONLY`, `BIDIRECTIONAL`). |
+| `/dashboard/scan` | Browser Scanner | `ORGANIZATION_ADMIN`, `HR_ADMIN` (Gated) | Browser-based webcam test scanner. Hidden unless `NEXT_PUBLIC_ENABLE_WEB_SCANNER=1`. |
+| `/dashboard/reports` | Reports & Export | `ORGANIZATION_ADMIN`, `HR_ADMIN`, `MANAGER` | Monthly metrics (hours worked, overtime, absences) and CSV downloads. |
+| `/dashboard/audit` | Audit Trail | `ORGANIZATION_ADMIN` | Immutable administrative log of credential and biometric actions. |
+| `/dashboard/settings` | Organization | `ORGANIZATION_ADMIN` | Organization profile and subscription seat usage. |
+| `/dashboard/settings/security` | Security & 2FA | `ORGANIZATION_ADMIN`, `HR_ADMIN`, `MANAGER` | Password changes and RFC 6238 TOTP two-factor setup/recovery codes. |
+
+---
+
+## Security Model
+
+* **Backend-For-Frontend (BFF) Architecture:**
+  The browser never calls the FastAPI backend directly and never has access to JWT access or refresh tokens in JavaScript. All requests go through Next.js Server Components or the `/api/proxy/[...path]` route handler.
+* **HttpOnly Session Cookies:**
+  Access tokens (`fa_access`) and refresh tokens (`fa_refresh`) are stored in `httpOnly`, `SameSite=Lax` cookies. The `Secure` flag is enforced in production or when `COOKIE_SECURE=1`.
+* **Proxy Allowlist:**
+  `/api/proxy/[...path]` strictly checks incoming paths and methods against an explicit regex allowlist. Any path or method not explicitly permitted returns `403 FORBIDDEN`.
+* **CSRF Validation:**
+  For mutating methods (`POST`, `PUT`, `PATCH`, `DELETE`), the proxy verifies that the `Origin` header matches the incoming `Host` header. If `Origin` is missing, `Sec-Fetch-Site` must equal `"same-origin"`. Requests failing this check receive `403 CSRF_ERROR`.
+* **Session Expiry:**
+  When the access token expires (30 minutes), server calls receive `401 UNAUTHORIZED`, clearing cookies and redirecting the browser to `/login?expired=1`.
+* **Local Storage Isolation:**
+  `localStorage` contains only a single user interface preference: `faceattend_theme` (`"glass"` or `"flat"`). No tokens, identities, or organizational data are stored in the browser's local storage.
+
+---
+
+## Theme & Styling
+
+* **Liquid Glass Skin:**
+  Features soft pastel gradient backdrops with blurred glass panels (`backdrop-filter: blur(18px) saturate(140%)`, `rgba(255, 255, 255, 0.62)`).
+* **Flat Theme Fallback:**
+  A "Liquid glass" toggle in the top navigation allows switching to an opaque, flat design token set.
+* **Accessibility Fallbacks:**
+  * System prefers reduced transparency: `@media (prefers-reduced-transparency: reduce)` falls back to solid background colors.
+  * Browser lacks backdrop filter: `@supports not (backdrop-filter: blur(1px))` falls back to opaque surface cards.
+  * System prefers reduced motion: `@media (prefers-reduced-motion: reduce)` disables background float animations.
+* **Design Tokens:**
+  All tokens (`--surface-glass`, `--border-glass`, `--shadow-glass`, `--accent-primary`, etc.) are declared in [`src/app/globals.css`](src/app/globals.css).
+
+---
+
+## Testing
+
+End-to-end tests use Playwright.
+
+### Running Playwright Tests
+
+```bash
+# 1. Start backend with demo data:
+cd ../backend
+APP_ENV=dev SEED_DEMO_DATA=true uvicorn app.main:app --reload
+
+# 2. Start web application:
+cd ../web
+npm run dev
+
+# 3. Run Playwright suite:
+npm run test:e2e
 ```
 
-- `POST /api/auth/login` calls the API and puts both tokens in **httpOnly, SameSite=Lax** cookies.
-  The browser receives `{ok: true}` and nothing else.
-- Server Components read the cookie and call the API directly (`lib/api.ts`), so most pages need
-  no client-side fetching at all.
-- The few calls that must start in the browser — creating an employee, uploading an enrollment
-  frame, running a scan, revoking a profile — go through `/api/proxy/[...path]`, which attaches
-  the token server-side. That proxy is a **per-method allowlist**, not an open relay.
-- Set `COOKIE_SECURE=1` when serving over HTTPS.
+### Test Specs (`web/tests/`)
+* `smoke.spec.ts`: Login, navigation across tabs, employee detail inspection, and reports export.
+* `security.spec.ts`: BFF proxy allowlist enforcement, CSRF origin rejection, and cookie security flags.
+* `org-isolation.spec.ts`: Cross-tenant boundary verification between `northwind` and `acme` organizations.
 
-`middleware.ts` bounces anonymous visitors off `/dashboard` before rendering. That is convenience,
-not security: every authorization decision is still made by the API.
+---
 
-## Roles in the UI
+## Status of Features & Known Gaps
 
-Navigation and buttons are hidden for roles that cannot use them, and pages like
-`/dashboard/scan` and `/dashboard/audit` redirect. This is purely to avoid dead ends — the server
-rejects the request regardless, and `/dashboard` deliberately degrades rather than erroring when a
-`MANAGER` may read attendance but not organization totals.
-
-## Known gaps
-
-- **The web scanner has no liveness detection.** A held-up photo would pass it. It sends
-  `liveness_score=1.0` and labels itself `web-console` so those scans are identifiable in the
-  audit log. Real kiosks should use the Android client, where the on-device SDK produces a score
-  the server enforces. Treat this page as an operator tool, not a turnstile.
-- **The web kiosk loop captures on a timer**, because a browser has no face detector to wait for.
-  The Android scanner waits for a stable face instead, which is why it is the better gate device.
-  Repeated captures of the same person are harmless: the server answers `ALREADY_PRESENT` and
-  writes nothing.
-- Access tokens are not refreshed automatically; when one expires the user is sent back to
-  `/login`. Wiring `/api/v1/auth/refresh` into the route handler is the next step.
-- No pagination on employees, attendance or the audit log.
-- No optimistic UI — mutations call `router.refresh()` and re-render from the server.
+| Feature | Status | Notes |
+| :--- | :--- | :--- |
+| Liquid Glass Interface & Flat Toggle | Implemented | Responsive layout with token-based glass surface and accessibility fallbacks. |
+| BFF Security Proxy & CSRF Gating | Implemented | Strict method allowlist with Origin and Sec-Fetch-Site checking. |
+| 7-Day Rolling Scan Photo Inspection | Implemented | Admin review gallery for verification frames on employee detail page. |
+| 2FA / TOTP Setup in Console | Implemented | QR code provisioning, code confirmation, and backup recovery codes. |
+| Automatic Background Token Refresh | Planned | Expired access tokens redirect to sign-in; transparent refresh in BFF proxy is not built yet. |
+| Table Pagination | Planned | Employees, attendance, and audit log tables load first page results without offset pagination controls. |
+| Work Shifts & Scheduling Page | Planned | Shifts are created via API; no dedicated management screen in the web console yet. |
+| Holidays & Time Off Calendar | Planned | Model and web calendar views are not implemented. |
+| Staff Team & Role Management | Planned | User administration exists via API, but team role assignment UI is not implemented. |
+| Bulk CSV Employee Import | Planned | Roster import currently requires individual creation via `/dashboard/employees/new` or API. |

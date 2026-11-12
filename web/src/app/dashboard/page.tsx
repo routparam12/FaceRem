@@ -46,7 +46,9 @@ export default async function OverviewPage() {
             })}
           </p>
         </div>
-        {canRunScans(me.role) && <ButtonLink href="/dashboard/scan">Open scanner</ButtonLink>}
+        {process.env.NEXT_PUBLIC_ENABLE_WEB_SCANNER === "1" && canRunScans(me.role) && (
+          <ButtonLink href="/dashboard/scan">Open scanner</ButtonLink>
+        )}
       </div>
 
       {summary ? (

@@ -19,6 +19,10 @@ sealed interface AppError {
         override val userMessage = "Check your internet connection and try again."
     }
 
+    data class ServerUnreachable(
+        override val userMessage: String = "Unable to connect to backend server. Please check your server IP address and port configuration.",
+    ) : AppError
+
     data object Timeout : AppError {
         override val userMessage = "The request timed out. Please try again."
     }

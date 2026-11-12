@@ -11,7 +11,6 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
-import com.facerem.feature.attendance.presentation.ScanRoute
 import com.facerem.feature.auth.presentation.ForgotPasswordRoute
 import com.facerem.feature.auth.presentation.LoginRoute
 import com.facerem.feature.auth.presentation.OnboardingRoute
@@ -113,10 +112,6 @@ fun AppNavHost(navController: NavHostController) {
             arguments = listOf(navArgument(AppRoute.EmployeeIdArg) { type = NavType.StringType }),
         ) {
             FaceEnrollmentRoute(onNavigateUp = navController::popBackStack)
-        }
-
-        composable(AppRoute.Scan) {
-            ScanRoute(onNavigateUp = navController::popBackStack)
         }
 
         composable(AppRoute.Reports) {

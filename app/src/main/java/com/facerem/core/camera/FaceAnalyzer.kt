@@ -5,6 +5,7 @@ import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.face.Face
 import com.google.mlkit.vision.face.FaceDetector
 
 /**
@@ -17,6 +18,7 @@ class FaceAnalyzer(
     private val detector: FaceDetector,
     private val poseProvider: () -> FaceQualityEvaluator.HeadPose,
     private val onQuality: (FaceQualityStatus) -> Unit,
+    private val onFacesDetected: ((faces: List<Face>, imageWidth: Int, imageHeight: Int) -> Unit)? = null,
 ) : ImageAnalysis.Analyzer {
 
     @OptIn(ExperimentalGetImage::class)
@@ -35,6 +37,7 @@ class FaceAnalyzer(
 
         detector.process(inputImage)
             .addOnSuccessListener { faces ->
+                onFacesDetected?.invoke(faces, uprightWidth, uprightHeight)
                 onQuality(
                     FaceQualityEvaluator.evaluate(
                         faces = faces,
@@ -45,7 +48,10 @@ class FaceAnalyzer(
                     ),
                 )
             }
-            .addOnFailureListener { onQuality(FaceQualityStatus.NO_FACE) }
+            .addOnFailureListener {
+                onFacesDetected?.invoke(emptyList(), uprightWidth, uprightHeight)
+                onQuality(FaceQualityStatus.NO_FACE)
+            }
             .addOnCompleteListener { imageProxy.close() }
     }
 }

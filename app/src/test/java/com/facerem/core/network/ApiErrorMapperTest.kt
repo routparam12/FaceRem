@@ -5,6 +5,7 @@ import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.net.ConnectException
 
 class ApiErrorMapperTest {
     private val mapper = ApiErrorMapper()
@@ -25,6 +26,8 @@ class ApiErrorMapperTest {
     fun `maps offline and timeout failures`() {
         assertEquals(AppError.NoInternet, mapper.map(UnknownHostException()))
         assertEquals(AppError.Timeout, mapper.map(SocketTimeoutException()))
+        val connectErr = mapper.map(ConnectException("Failed to connect to 10.0.2.2:8000"))
+        assert(connectErr is AppError.ServerUnreachable)
     }
 
     private val AppError.code: String

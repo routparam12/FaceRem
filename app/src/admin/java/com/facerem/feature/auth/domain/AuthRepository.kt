@@ -5,7 +5,12 @@ import com.facerem.core.model.User
 
 interface AuthRepository {
     /** Maps to `POST /api/v1/auth/login`. */
-    suspend fun login(email: String, password: String, organizationCode: String): AppResult<User>
+    suspend fun login(
+        email: String,
+        password: String,
+        organizationCode: String,
+        totpCode: String? = null,
+    ): AppResult<User>
 
     /**
      * Starts a local, read-only demo session. No credentials are exchanged and no server

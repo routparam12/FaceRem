@@ -11,10 +11,12 @@ import com.facerem.core.model.Shift
 import com.facerem.core.network.ApiCall
 import com.facerem.core.network.api.FaceAttendApi
 import com.facerem.core.network.dto.NewEmployeeDto
+import com.facerem.core.network.dto.UpdateEmployeeDto
 import com.facerem.core.network.mapper.toEmployee
 import com.facerem.core.network.mapper.toRecord
 import com.facerem.feature.employees.domain.EmployeeRepository
 import com.facerem.feature.employees.domain.NewEmployee
+import com.facerem.feature.employees.domain.UpdateEmployee
 import javax.inject.Inject
 import javax.inject.Singleton
 import okhttp3.MediaType.Companion.toMediaType
@@ -45,6 +47,23 @@ class RemoteEmployeeRepository @Inject constructor(
                     branch = employee.branch.ifBlank { null },
                     jobTitle = employee.jobTitle.trim().ifBlank { null },
                     shift = employee.shiftName.ifBlank { null },
+                ),
+            )
+        }.map { it.toEmployee() }
+
+    override suspend fun updateEmployee(id: String, update: UpdateEmployee): AppResult<Employee> =
+        apiCall.invoke {
+            api.updateEmployee(
+                id = id,
+                body = UpdateEmployeeDto(
+                    fullName = update.fullName?.trim()?.ifBlank { null },
+                    email = update.email?.trim()?.ifBlank { null },
+                    phone = update.phone?.trim()?.ifBlank { null },
+                    department = update.department?.trim()?.ifBlank { null },
+                    branch = update.branch?.trim()?.ifBlank { null },
+                    jobTitle = update.jobTitle?.trim()?.ifBlank { null },
+                    shiftName = update.shiftName?.trim()?.ifBlank { null },
+                    isActive = update.isActive,
                 ),
             )
         }.map { it.toEmployee() }

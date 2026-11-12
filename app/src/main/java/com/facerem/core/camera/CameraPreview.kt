@@ -16,6 +16,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import com.google.mlkit.vision.face.Face
 import com.google.mlkit.vision.face.FaceDetector
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -34,16 +35,18 @@ fun FaceCameraPreview(
     onQuality: (FaceQualityStatus) -> Unit,
     modifier: Modifier = Modifier,
     captureController: FaceCaptureController? = null,
+    onFacesDetected: ((faces: List<Face>, imageWidth: Int, imageHeight: Int) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val currentPose = rememberUpdatedState(pose)
     val currentOnQuality = rememberUpdatedState(onQuality)
+    val currentOnFacesDetected = rememberUpdatedState(onFacesDetected)
     val executor: ExecutorService = remember { Executors.newSingleThreadExecutor() }
     val previewView = remember {
         PreviewView(context).apply {
             scaleType = PreviewView.ScaleType.FILL_CENTER
-            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            implementationMode = PreviewView.ImplementationMode.PERFORMANCE
         }
     }
 
@@ -70,6 +73,9 @@ fun FaceCameraPreview(
                                 detector = detector,
                                 poseProvider = { currentPose.value },
                                 onQuality = { status -> currentOnQuality.value(status) },
+                                onFacesDetected = { faces, width, height ->
+                                    currentOnFacesDetected.value?.invoke(faces, width, height)
+                                },
                             ),
                         )
                     }

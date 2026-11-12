@@ -13,6 +13,7 @@ import com.facerem.feature.employees.data.DemoEmployeeRepository
 import com.facerem.feature.employees.data.RemoteEmployeeRepository
 import com.facerem.feature.employees.domain.EmployeeRepository
 import com.facerem.feature.reports.data.DemoReportRepository
+import com.facerem.feature.reports.data.RemoteReportRepository
 import com.facerem.feature.reports.domain.ReportRepository
 import dagger.Binds
 import dagger.Module
@@ -35,10 +36,6 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindAuthRepository(impl: AuthRepositoryImpl): AuthRepository
-
-    @Binds
-    @Singleton
-    abstract fun bindReportRepository(impl: DemoReportRepository): ReportRepository
 
     companion object {
         @Provides
@@ -64,5 +61,13 @@ abstract class RepositoryModule {
             demo: DemoAttendanceRepository,
             session: SessionManager,
         ): AttendanceRepository = DispatchingAttendanceRepository(remote, demo, session)
+
+        @Provides
+        @Singleton
+        fun provideReportRepository(
+            remote: RemoteReportRepository,
+            demo: DemoReportRepository,
+            session: SessionManager,
+        ): ReportRepository = DispatchingReportRepository(remote, demo, session)
     }
 }

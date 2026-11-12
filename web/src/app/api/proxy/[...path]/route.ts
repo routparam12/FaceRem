@@ -18,6 +18,10 @@ const ALLOWED: Record<string, RegExp[]> = {
     /^api\/v1\/organization$/,
     /^api\/v1\/reports\/attendance-events\.csv$/,
     /^api\/v1\/reports\/monthly-summary\.csv$/,
+    /^api\/v1\/reports\/summary$/,
+    /^api\/v1\/employees\/[\w-]+\/avatar$/,
+    /^api\/v1\/employees\/[\w-]+\/recent-scans$/,
+    /^api\/v1\/employees\/[\w-]+\/recent-scans\/[\w.-]+$/,
   ],
   POST: [
     /^api\/v1\/employees$/,

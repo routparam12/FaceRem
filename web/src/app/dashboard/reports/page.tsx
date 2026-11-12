@@ -1,10 +1,42 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button, Card, Field } from "@/components/ui";
 
+interface DepartmentRate {
+  department: string;
+  rate: number;
+  head_count: number;
+}
+
+interface ReportSummary {
+  period_label: string;
+  average_attendance_rate: number;
+  total_worked_hours: number;
+  total_overtime_hours: number;
+  late_arrivals: number;
+  absences: number;
+  department_breakdown: DepartmentRate[];
+}
+
 export default function ReportsPage() {
+  // Live Report Summary State
+  const [summary, setSummary] = useState<ReportSummary | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/proxy/api/v1/reports/summary")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && data.success && data.data) {
+          setSummary(data.data);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setSummaryLoading(false));
+  }, []);
+
   // Attendance Events Filter
   const [startDate, setStartDate] = useState(
     new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
@@ -40,12 +72,93 @@ export default function ReportsPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-ink-900">Reports & Data Export</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-ink-900">Reports & Analytics</h1>
         <p className="mt-1 text-sm text-ink-500">
-          Export verified attendance records and payroll metrics as UTF-8 BOM CSV files.
+          Real-time attendance summaries, payroll metrics, and formula-injection-safe CSV exports.
         </p>
       </div>
 
+      {/* Live Operational Metrics */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Card className="p-5">
+          <p className="text-xs font-semibold uppercase tracking-wider text-ink-500">
+            Attendance Rate
+          </p>
+          <p className="mt-2 text-3xl font-bold text-ink-900">
+            {summaryLoading
+              ? "…"
+              : `${Math.round((summary?.average_attendance_rate ?? 0) * 100)}%`}
+          </p>
+          <p className="mt-1 text-xs text-brand-600 font-medium">
+            {summary?.period_label ?? "Current month"}
+          </p>
+        </Card>
+
+        <Card className="p-5">
+          <p className="text-xs font-semibold uppercase tracking-wider text-ink-500">
+            Total Hours Worked
+          </p>
+          <p className="mt-2 text-3xl font-bold text-ink-900">
+            {summaryLoading ? "…" : `${summary?.total_worked_hours ?? 0} hrs`}
+          </p>
+          <p className="mt-1 text-xs text-ink-500">
+            {summary?.total_overtime_hours ?? 0} hrs overtime
+          </p>
+        </Card>
+
+        <Card className="p-5">
+          <p className="text-xs font-semibold uppercase tracking-wider text-ink-500">
+            Late Arrivals
+          </p>
+          <p className="mt-2 text-3xl font-bold text-amber-600">
+            {summaryLoading ? "…" : summary?.late_arrivals ?? 0}
+          </p>
+          <p className="mt-1 text-xs text-ink-500">Total this month</p>
+        </Card>
+
+        <Card className="p-5">
+          <p className="text-xs font-semibold uppercase tracking-wider text-ink-500">
+            Unexcused Absences
+          </p>
+          <p className="mt-2 text-3xl font-bold text-rose-600">
+            {summaryLoading ? "…" : summary?.absences ?? 0}
+          </p>
+          <p className="mt-1 text-xs text-ink-500">Total this month</p>
+        </Card>
+      </div>
+
+      {/* Department Breakdown if present */}
+      {summary && summary.department_breakdown && summary.department_breakdown.length > 0 && (
+        <Card className="p-6">
+          <h2 className="text-sm font-bold uppercase tracking-wider text-ink-900 mb-4">
+            Department Attendance Breakdown
+          </h2>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {summary.department_breakdown.map((dept) => (
+              <div
+                key={dept.department}
+                className="rounded-xl border border-[var(--glass-border)] bg-[var(--glass-input-bg)] p-4"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-ink-900">{dept.department}</span>
+                  <span className="text-xs font-bold text-brand-600">
+                    {Math.round(dept.rate * 100)}%
+                  </span>
+                </div>
+                <div className="mt-2 h-2 w-full rounded-full bg-ink-100 overflow-hidden">
+                  <div
+                    className="h-full bg-brand-500 rounded-full transition-all duration-500"
+                    style={{ width: `${Math.round(dept.rate * 100)}%` }}
+                  />
+                </div>
+                <p className="mt-2 text-xs text-ink-500">{dept.head_count} active employees</p>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* CSV Exports */}
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Report 1: Raw Attendance Events */}
         <Card className="p-6 space-y-5">
@@ -94,9 +207,7 @@ export default function ReportsPage() {
             </div>
 
             <div className="pt-2 flex justify-end">
-              <Button onClick={downloadEventsCsv}>
-                Download Events CSV
-              </Button>
+              <Button onClick={downloadEventsCsv}>Download Events CSV</Button>
             </div>
           </div>
         </Card>
@@ -153,9 +264,7 @@ export default function ReportsPage() {
             </div>
 
             <div className="pt-8 flex justify-end">
-              <Button onClick={downloadMonthlySummaryCsv}>
-                Download Monthly Summary CSV
-              </Button>
+              <Button onClick={downloadMonthlySummaryCsv}>Download Monthly Summary CSV</Button>
             </div>
           </div>
         </Card>
@@ -187,4 +296,3 @@ export default function ReportsPage() {
     </div>
   );
 }
-

@@ -20,6 +20,17 @@ data class NewEmployee(
     val shiftName: String,
 )
 
+data class UpdateEmployee(
+    val fullName: String? = null,
+    val email: String? = null,
+    val phone: String? = null,
+    val department: String? = null,
+    val branch: String? = null,
+    val jobTitle: String? = null,
+    val shiftName: String? = null,
+    val isActive: Boolean? = null,
+)
+
 interface EmployeeRepository {
     /** Maps to `GET /api/v1/employees`. */
     suspend fun loadEmployees(): AppResult<List<Employee>>
@@ -29,6 +40,9 @@ interface EmployeeRepository {
 
     /** Maps to `POST /api/v1/employees`. */
     suspend fun createEmployee(employee: NewEmployee): AppResult<Employee>
+
+    /** Maps to `PATCH /api/v1/employees/{id}`. */
+    suspend fun updateEmployee(id: String, update: UpdateEmployee): AppResult<Employee>
 
     /**
      * Maps to `POST /api/v1/employees/{employeeId}/face/enroll`.

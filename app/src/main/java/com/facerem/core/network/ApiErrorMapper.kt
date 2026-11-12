@@ -1,7 +1,9 @@
 package com.facerem.core.network
 
+import android.os.Build
 import com.facerem.core.common.AppError
 import java.io.IOException
+import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import retrofit2.HttpException
@@ -9,10 +11,46 @@ import retrofit2.HttpException
 class ApiErrorMapper {
     fun map(throwable: Throwable): AppError = when (throwable) {
         is HttpException -> mapHttpStatus(throwable.code())
-        is UnknownHostException -> AppError.NoInternet
         is SocketTimeoutException -> AppError.Timeout
-        is IOException -> AppError.NoInternet
+        is ConnectException -> {
+            val msg = throwable.message.orEmpty()
+            if (msg.contains("10.0.2.2") || isPhysicalDevice()) {
+                AppError.ServerUnreachable(
+                    "Cannot reach backend server. If running on a physical device, ensure the backend server is running on your PC and specify your PC's IP address (e.g. ./gradlew assembleAdminDebug -Pfaceattend.apiHost=<YOUR_PC_IP>).",
+                )
+            } else {
+                AppError.ServerUnreachable("Connection refused by backend server. Please check that the server is running.")
+            }
+        }
+        is UnknownHostException -> AppError.NoInternet
+        is IOException -> {
+            val msg = throwable.message.orEmpty()
+            if (msg.contains("10.0.2.2") && isPhysicalDevice()) {
+                AppError.ServerUnreachable(
+                    "Cannot reach 10.0.2.2 from a physical device. Build with -Pfaceattend.apiHost=<YOUR_PC_IP>.",
+                )
+            } else {
+                AppError.NoInternet
+            }
+        }
         else -> AppError.Unknown
+    }
+
+    private fun isPhysicalDevice(): Boolean {
+        return runCatching {
+            val fingerprint = Build.FINGERPRINT.orEmpty()
+            val model = Build.MODEL.orEmpty()
+            val hardware = Build.HARDWARE.orEmpty()
+            val brand = Build.BRAND.orEmpty()
+            !(fingerprint.startsWith("generic") ||
+                fingerprint.startsWith("unknown") ||
+                model.contains("google_sdk") ||
+                model.contains("Emulator") ||
+                model.contains("Android SDK built for x86") ||
+                hardware.contains("goldfish") ||
+                hardware.contains("ranchu") ||
+                brand.startsWith("generic"))
+        }.getOrDefault(true)
     }
 
     fun mapHttpStatus(statusCode: Int): AppError = when (statusCode) {

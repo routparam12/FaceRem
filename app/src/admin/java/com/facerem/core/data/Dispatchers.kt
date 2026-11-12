@@ -10,12 +10,15 @@ import com.facerem.core.model.Employee
 import com.facerem.core.model.FaceEnrollmentStatus
 import com.facerem.core.model.LivenessChallenge
 import com.facerem.core.model.RecognitionOutcome
+import com.facerem.core.model.ReportSummary
 import com.facerem.core.model.Shift
 import com.facerem.core.session.SessionManager
 import com.facerem.feature.attendance.domain.AttendanceRepository
 import com.facerem.feature.dashboard.domain.DashboardRepository
 import com.facerem.feature.employees.domain.EmployeeRepository
 import com.facerem.feature.employees.domain.NewEmployee
+import com.facerem.feature.employees.domain.UpdateEmployee
+import com.facerem.feature.reports.domain.ReportRepository
 import kotlinx.coroutines.flow.first
 
 /**
@@ -39,6 +42,9 @@ internal class DispatchingEmployeeRepository(
 
     override suspend fun createEmployee(employee: NewEmployee): AppResult<Employee> =
         active().createEmployee(employee)
+
+    override suspend fun updateEmployee(id: String, update: UpdateEmployee): AppResult<Employee> =
+        active().updateEmployee(id, update)
 
     override suspend fun submitFaceEnrollment(
         employeeId: String,
@@ -96,4 +102,13 @@ internal class DispatchingAttendanceRepository(
 
     override suspend fun verifyPin(employeeCode: String, pin: String): AppResult<RecognitionOutcome> =
         active().verifyPin(employeeCode, pin)
+}
+
+internal class DispatchingReportRepository(
+    private val remote: ReportRepository,
+    private val demo: ReportRepository,
+    private val session: SessionManager,
+) : ReportRepository {
+    override suspend fun loadSummary(): AppResult<ReportSummary> =
+        (if (session.isGuest.first()) demo else remote).loadSummary()
 }

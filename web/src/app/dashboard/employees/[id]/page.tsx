@@ -1,9 +1,10 @@
 import Link from "next/link";
 
 import EmployeeActions from "@/components/employee-actions";
+import EmployeeAvatar from "@/components/employee-avatar";
+import EmployeeRecentScans from "@/components/employee-recent-scans";
 import EnrollPanel from "@/components/enroll-panel";
 import {
-  Avatar,
   Card,
   EmptyState,
   EnrollmentPill,
@@ -36,7 +37,12 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
       </Link>
 
       <div className="flex flex-wrap items-center gap-4">
-        <Avatar name={employee.full_name} className="size-16 text-lg" />
+        <EmployeeAvatar
+          employeeId={employee.id}
+          name={employee.full_name}
+          faceEnrolled={employee.face_enrolled}
+          className="size-16 text-lg"
+        />
         <div className="flex-1">
           <h1 className="text-2xl font-bold tracking-tight text-ink-900">{employee.full_name}</h1>
           <p className="mt-0.5 text-sm text-ink-500">
@@ -88,7 +94,12 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
       </div>
 
       {canManagePeople(me.role) && (
-        <EmployeeActions employeeId={employee.id} isActive={employee.is_active} />
+        <EmployeeActions employeeId={employee.id} isActive={employee.is_active} employee={employee} />
+      )}
+
+      {/* Admin Audit: Recent Kiosk Scan Photos (Last 7 Days) */}
+      {canManagePeople(me.role) && (
+        <EmployeeRecentScans employeeId={employee.id} />
       )}
 
       <section>
